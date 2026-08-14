@@ -1,0 +1,21 @@
+services:
+  db:
+    container_name: postgres-spring-boot-example
+    image: postgres:latest
+    environment:
+      POSTGRES_USER: artem
+      POSTGRES_PASSWORD: 123456
+      PGDATA: /data/postgres
+    volumes:
+      - db:/data/postgres
+    ports:
+      - "5332:5432"
+    networks:
+      - db
+    restart: unless-stopped
+networks:
+  db:
+    driver: bridge
+
+volumes:
+  db:
