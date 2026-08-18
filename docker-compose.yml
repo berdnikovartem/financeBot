@@ -1,6 +1,6 @@
 services:
   db:
-    container_name: postgres-spring-boot-example
+    container_name: financeBot
     image: postgres:latest
     environment:
       POSTGRES_USER: artem

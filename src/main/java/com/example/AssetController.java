@@ -8,20 +8,19 @@ import java.util.List;
 @RequestMapping("api/assets")
 public class AssetController {
 
-    //private final AssetService as;
+    private final AssetService as;
 
-    public AssetController(/*AssetService as*/){
-        //this.as = as;
+    public AssetController(AssetService as){
+        this.as = as;
     }
 
-    /*@GetMapping
+    @GetMapping
     public List<Asset> getAssets(){
-        //return as.getAssets();
-        return;
+        return as.getAssets();
     }
-    */
 
-    /*@PostMapping
+
+    @PostMapping
     public void addAsset(@RequestBody Asset a){
         as.insertNewAsset(a);
     }
