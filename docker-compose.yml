@@ -1,21 +1,39 @@
+version: '3.8'
+
 services:
+  app:
+    build: .
+    container_name: finance_bot_app
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    depends_on:
+      - db
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/artem
+      SPRING_DATASOURCE_USERNAME: artem
+      SPRING_DATASOURCE_PASSWORD: 123456
+    networks:
+      - bot-network
+
   db:
-    container_name: financeBot
-    image: postgres:latest
+    image: postgres:16-alpine
+    container_name: finance_bot_db
+    restart: unless-stopped
     environment:
       POSTGRES_USER: artem
       POSTGRES_PASSWORD: 123456
-      PGDATA: /data/postgres
+      POSTGRES_DB: artem
     volumes:
-      - db:/data/postgres
+      - postgres_data:/var/lib/postgresql/data
     ports:
       - "5332:5432"
     networks:
-      - db
-    restart: unless-stopped
+      - bot-network
+
 networks:
-  db:
+  bot-network:
     driver: bridge
 
 volumes:
-  db:
+  postgres_data:
