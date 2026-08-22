@@ -1,21 +1,9 @@
- ### GET request to example server
-//GET http://localhost:8080
-###
-GET http://localhost:8080/api/v1/engineers
-###
 GET http://localhost:8080/api/assets
 ###
 POST http://localhost:8080/api/assets
 Content-Type: application/json
 
 {
-  "name": "BTC/USDT"
+  "name": "ETH/USDT"
 }
 ###
-POST http://localhost:8080/api/v1/engineers
-Content-Type: application/json
-
-{
-  "name": "Miya",
-  "stack": "szx"
-}
