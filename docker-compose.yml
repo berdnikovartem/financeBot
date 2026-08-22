@@ -1,9 +1,9 @@
-version: '3.8'
+version: '3'
 
 services:
   app:
-    build: .
-    container_name: finance_bot_app
+    build: ./spring-java
+    container_name: java-api
     restart: unless-stopped
     ports:
       - "8080:8080"
@@ -16,13 +16,24 @@ services:
     networks:
       - bot-network
 
+  cpp-fetcher:
+    build: ./data-worker-fetcher-cpp
+    container_name: finance_bot_worker
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - bot-network
+
   db:
     image: postgres:16-alpine
     container_name: finance_bot_db
     restart: unless-stopped
     environment:
       POSTGRES_USER: artem
-      POSTGRES_PASSWORD: 123456
+      POSTGRES_PASSWORD: "123456"
       POSTGRES_DB: artem
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -30,6 +41,11 @@ services:
       - "5332:5432"
     networks:
       - bot-network
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U artem -d artem" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
 networks:
   bot-network:
