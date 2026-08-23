@@ -55,9 +55,45 @@ void sendTelegramAlert(const std::string& ticker, double rsi) {
     std::cout << "[Telegram Response]: " << response << std::endl;
 }
 
-double calculateRSI(const std::vector<double>& prices) {
-    // TODO: 14-period RSI mathematical logic goes here
-    return 75.0; // Placeholder returning 75.0
+double calculateRSI(const std::vector<double>& prices, int period = 14) {
+    if (prices.size() <= static_cast<size_t>(period)) {
+        return 50.0;
+    }
+
+    double avgGain = 0.0;
+    double avgLoss = 0.0;
+
+    // Initial Average Gain and Average Loss for the first 14 periods
+    for (int i = 1; i <= period; ++i) {
+        double change = prices[i] - prices[i - 1];
+        if (change > 0) {
+            avgGain += change;
+        } else {
+            avgLoss += std::abs(change);
+        }
+    }
+
+    avgGain /= period;
+    avgLoss /= period;
+
+    // Wilder's Smoothing for all remaining price candles
+    for (size_t i = period + 1; i < prices.size(); ++i) {
+        double change = prices[i] - prices[i - 1];
+        double currentGain = (change > 0) ? change : 0.0;
+        double currentLoss = (change < 0) ? std::abs(change) : 0.0;
+
+        avgGain = (avgGain * (period - 1) + currentGain) / period;
+        avgLoss = (avgLoss * (period - 1) + currentLoss) / period;
+    }
+
+    // division by zero (if prices only went up, loss is 0)
+    if (avgLoss == 0.0) {
+        return 100.0;
+    }
+
+    // Calculate final RS and RSI values
+    double rs = avgGain / avgLoss;
+    return 100.0 - (100.0 / (1.0 + rs));
 }
 
 int main() {
@@ -97,6 +133,10 @@ int main() {
                 // 6. Check Condition and Alert
                 if (rsi > 70.0) {
                     sendTelegramAlert(ticker, rsi);
+                }else if (rsi < 30.0) {
+                    sendTelegramAlert(ticker, rsi);
+                }else {
+                    //sendTelegramAlert(ticker, rsi);
                 }
             }
         } catch (const std::exception &e) {
