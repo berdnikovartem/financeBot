@@ -19,21 +19,21 @@ static size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* use
 std::string fetchUrl(const std::string& url) {
     CURL* curl = curl_easy_init();
     std::string readBuffer;
-    if(curl) {
+    if (curl) {
         curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
-
-        // Force the connection to abort after 10 seconds
         curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
 
-        curl_easy_perform(curl);
+        CURLcode res = curl_easy_perform(curl);
+        if (res != CURLE_OK) {
+            std::cerr << "[cURL Error]: " << curl_easy_strerror(res) << std::endl;
+        }
         curl_easy_cleanup(curl);
     }
     return readBuffer;
 }
-
-void sendTelegramAlert(const std::string& ticker, double rsi) {
+void sendTelegramAlert(const std::string& rawMessage) {
     const char* tokenEnv = std::getenv("TELEGRAM_BOT_TOKEN");
     const char* chatIdEnv = std::getenv("MY_CHAT_ID");
 
@@ -42,15 +42,21 @@ void sendTelegramAlert(const std::string& ticker, double rsi) {
         return;
     }
 
+    CURL* curl = curl_easy_init();
+    if (!curl) return;
+
+    // Safely encode spaces, colons, and mathematical symbols
+    char* encoded = curl_easy_escape(curl, rawMessage.c_str(), static_cast<int>(rawMessage.length()));
+    std::string safeMessage = encoded ? encoded : "";
+    curl_free(encoded);
+    curl_easy_cleanup(curl);
+
     std::string botToken(tokenEnv);
     std::string chatId(chatIdEnv);
-
-    std::string message = "Alert!%20" + ticker + "%20RSI%20is%20" + std::to_string(rsi);
-
     std::string url = "https://api.telegram.org/bot" + botToken +
-                      "/sendMessage?chat_id=" + chatId + "&text=" + message;
+                      "/sendMessage?chat_id=" + chatId + "&text=" + safeMessage;
 
-    std::cout << "[Telegram] Sending alert for " << ticker << "...\n";
+    std::cout << "[Telegram] Sending alert...\n";
     std::string response = fetchUrl(url);
     std::cout << "[Telegram Response]: " << response << std::endl;
 }
@@ -130,13 +136,14 @@ int main() {
                 // 5. Calculate RSI
                 double rsi = calculateRSI(closingPrices);
 
+                //std::string message = "Alert!%20" + ticker + "%20RSI%20is%20" + std::to_string(rsi);
                 // 6. Check Condition and Alert
                 if (rsi > 70.0) {
-                    sendTelegramAlert(ticker, rsi);
+                    sendTelegramAlert("Ticker: " + ticker + " RSI value is >70, = " + std::to_string(rsi));
                 }else if (rsi < 30.0) {
-                    sendTelegramAlert(ticker, rsi);
+                    sendTelegramAlert("Ticker: " + ticker + " RSI value is <30, = " + std::to_string(rsi));
                 }else {
-                    //sendTelegramAlert(ticker, rsi);
+                    sendTelegramAlert("Ticker: " + ticker + " RSI value is: " + std::to_string(rsi));
                 }
             }
         } catch (const std::exception &e) {
@@ -144,8 +151,8 @@ int main() {
         }
 
         // Pause for 3 seconds before hitting the database and Binance again
-        std::cout << "Sleeping for 3 seconds...\n";
-        std::this_thread::sleep_for(std::chrono::seconds(3));
+        std::cout << "Sleeping for 5 seconds...\n";
+        std::this_thread::sleep_for(std::chrono::seconds(5));
     }
 
     return 0;
