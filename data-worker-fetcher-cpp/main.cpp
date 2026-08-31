@@ -103,41 +103,30 @@ double calculateRSI(const std::vector<double>& prices, int period = 14) {
 }
 
 int main() {
-    // Keep the worker alive forever
     while (true) {
         try {
-            // 1. Connect to PostgreSQL
             pqxx::connection c("dbname=artem user=artem password=123456 host=db port=5432");
             pqxx::work w(c);
 
-            // 2. Fetch tickers from your database table
             pqxx::result rows = w.exec("SELECT name FROM asset");
 
             for (auto const& row : rows) {
-                // Note: Binance expects symbols like "BTCUSDT" (no hyphens)
                 std::string ticker = row[0].c_str();
                 std::cout << "Checking " << ticker << " on Binance...\n";
 
-                // 3. Fetch Binance Kline Data (1-hour candles)
                 std::string url = "https://api.binance.com/api/v3/klines?symbol=" + ticker + "&interval=1h";
                 std::string response = fetchUrl(url);
 
-                // 4. Parse Binance JSON
                 json jsonData = json::parse(response);
                 std::vector<double> closingPrices;
 
-                // Binance returns an array of arrays. Index [4] is the Closing Price.
                 for (const auto& kline : jsonData) {
-                    // Extract the string at index 4 and convert it to a double
                     double closePrice = std::stod(kline[4].get<std::string>());
                     closingPrices.push_back(closePrice);
                 }
 
-                // 5. Calculate RSI
                 double rsi = calculateRSI(closingPrices);
 
-                //std::string message = "Alert!%20" + ticker + "%20RSI%20is%20" + std::to_string(rsi);
-                // 6. Check Condition and Alert
                 if (rsi > 70.0) {
                     sendTelegramAlert("Ticker: " + ticker + " RSI value is >70, = " + std::to_string(rsi));
                 }else if (rsi < 30.0) {
@@ -150,7 +139,6 @@ int main() {
             std::cerr << "Error: " << e.what() << std::endl;
         }
 
-        // Pause for 3 seconds before hitting the database and Binance again
         std::cout << "Sleeping for 5 seconds...\n";
         std::this_thread::sleep_for(std::chrono::seconds(5));
     }
