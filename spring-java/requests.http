@@ -7,3 +7,50 @@ Content-Type: application/json
   "name": "BTCUSDT"
 }
 ###
+
+# curl -X PUT http://localhost:8080/api/v1/config/BTCUSDT
+#  -H "Content-Type: application/json"
+#  -d '{
+#    "active": true,
+#    "parameters": {
+#      "rsi_period": 14,
+#      "rsi_overbought": 70,
+#      "rsi_oversold": 30,
+#      "timeframe": "1h"
+#    }
+#  }'
+PUT http://localhost:8080/api/v1/config/BTCUSDT
+Content-Type: application/json
+
+{
+  "active": true,
+  "parameters": {
+    "rsi_period": 14,
+    "rsi_overbought": 70,
+    "rsi_oversold": 30,
+    "timeframe": "1h"
+  }
+}
+
+###
+
+
+# curl http://localhost:8080/api/v1/config/BTCUSDT
+GET http://localhost:8080/api/v1/config/BTCUSDT
+
+###
+
+PUT http://localhost:8080/api/v1/config/BTCUSDT
+Content-Type: application/json
+
+{
+  "active": true,
+  "parameters": {
+    "rsi_period": 14,
+    "rsi_overbought": 70,
+    "rsi_oversold": 30,
+    "timeframe": "1h"
+  }
+}
+
+###
