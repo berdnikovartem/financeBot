@@ -54,4 +54,24 @@ public class BotConfig{
     public void setParameters(Map<String, Object> parameters) {
         this.parameters = parameters;
     }
+
+    public int getRsiPeriod() {
+        if (parameters == null || !parameters.containsKey("rsi_period")) return 14;
+        return ((Number) parameters.get("rsi_period")).intValue();
+    }
+
+    public double getRsiOverbought() {
+        if (parameters == null || !parameters.containsKey("rsi_overbought")) return 70.0;
+        return ((Number) parameters.get("rsi_overbought")).doubleValue();
+    }
+
+    public double getRsiOversold() {
+        if (parameters == null || !parameters.containsKey("rsi_oversold")) return 30.0;
+        return ((Number) parameters.get("rsi_oversold")).doubleValue();
+    }
+
+    public String getTimeframe() {
+        if (parameters == null || !parameters.containsKey("timeframe")) return "1h";
+        return (String) parameters.get("timeframe");
+    }
 }

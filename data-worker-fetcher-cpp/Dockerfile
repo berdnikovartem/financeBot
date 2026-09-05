@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /worker
 
 COPY CMakeLists.txt .
-COPY main.cpp .
+COPY src/ ./src/
 
 # Compile the C++ program
 RUN cmake . && make

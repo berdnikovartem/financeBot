@@ -54,3 +54,57 @@ Content-Type: application/json
 }
 
 ###
+
+PUT http://localhost:8080/api/v1/config/BTCUSDT
+Content-Type: application/json
+
+{
+  "active": true,
+  "parameters": {
+    "rsi_period": 14,
+    "rsi_overbought": 70.0,
+    "rsi_oversold": 30.0,
+    "timeframe": "1h"
+  }
+}
+
+###
+
+
+# curl -X GET http://localhost:8080/api/v1/config/BTCUSDT
+GET http://localhost:8080/api/v1/config/BTCUSDT
+
+###
+
+
+# curl -X GET http://localhost:8080/api/v1/configs/active
+GET http://localhost:8080/api/v1/configs/active
+
+###
+
+
+# curl -X PUT http://localhost:8080/api/v1/config/ETHUSDT
+#  -H "Content-Type: application/json"
+#  -d '{
+#    "active": true,
+#    "parameters": {
+#      "rsi_period": 14,
+#      "rsi_overbought": 75.0,
+#      "rsi_oversold": 25.0,
+#      "timeframe": "1h"
+#    }
+#  }'
+PUT http://localhost:8080/api/v1/config/ARBUSDT
+Content-Type: application/json
+
+{
+  "active": true,
+  "parameters": {
+    "rsi_period": 14,
+    "rsi_overbought": 75.0,
+    "rsi_oversold": 25.0,
+    "timeframe": "1h"
+  }
+}
+
+###

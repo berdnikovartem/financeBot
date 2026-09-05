@@ -7,7 +7,11 @@ find_package(libpqxx QUIET)
 find_package(nlohmann_json REQUIRED)
 find_package(CURL REQUIRED)
 
-add_executable(crypto_worker main.cpp)
+add_executable(crypto_worker
+        src/main.cpp
+        src/ConfigFetcher.cpp
+        src/MarketAnalyzer.cpp
+)
 
 target_link_libraries(crypto_worker
         PRIVATE
