@@ -6,6 +6,8 @@ class MarketAnalyzer {
 private:
     static size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp);
 
+    long long lastSignaledCandleOpen = 0;
+
 public:
     MarketAnalyzer() = default;
 
@@ -14,4 +16,14 @@ public:
 
     //method to calculate the RSI
     double calculateWildersRSI(const std::vector<double>& closes, int period);
+
+    // Hammer pattern recognition (supports bullish bottom hammer or bearish shooting star)
+    bool hammerPattern(double open, double high, double low, double close, bool side);
+
+    // Volume surge recognition
+    bool volumeSurge(double currentVolume, double averageVolume, double surgeMultiplier = 1.5);
+
+    // Intra-candle time check: returns true if 'thresholdSeconds' have elapsed since the candle started,
+    // and ensures it only triggers once per unique candle.
+    bool sufficientTimePass(long long candleOpenTimeMs, int thresholdSeconds);
 };

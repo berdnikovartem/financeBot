@@ -90,3 +90,44 @@ double MarketAnalyzer::calculateWildersRSI(const std::vector<double>& closes, in
     double rs = avg_gain / avg_loss;
     return 100.0 - (100.0 / (1.0 + rs));
 }
+
+bool MarketAnalyzer::hammerPattern(double open, double high, double low, double close, bool side) {
+    double body = std::abs(open - close);
+    double upperShadow = high - std::max(open, close);
+    double lowerShadow = std::min(open, close) - low;
+    double totalCandleSize = high - low;
+
+    if (totalCandleSize == 0) return false;
+
+    if (side) {
+        // Bullish Hammer
+        bool longLowerShadow = lowerShadow >= (1.5 * body);
+        //bool tinyUpperShadow = upperShadow <= (0.10 * totalCandleSize);
+        return longLowerShadow; //&& tinyUpperShadow;
+    } else {
+        // Bearish Shooting Star
+        bool longUpperShadow = upperShadow >= (1.5 * body);
+        //bool tinyLowerShadow = lowerShadow <= (0.10 * totalCandleSize);
+        return longUpperShadow; //&& tinyLowerShadow;
+    }
+}
+
+bool MarketAnalyzer::volumeSurge(double currentVolume, double averageVolume, double surgeMultiplier) {
+    if (averageVolume <= 0) return false;
+    return currentVolume >= (averageVolume * surgeMultiplier);
+}
+
+bool MarketAnalyzer::sufficientTimePass(long long candleOpenTimeMs, int thresholdSeconds) {
+    long long currentTimestampMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+    ).count();
+
+    long long elapsedMs = currentTimestampMs - candleOpenTimeMs;
+    long long thresholdMs = thresholdSeconds * 1000LL;
+
+    if (elapsedMs >= thresholdMs && candleOpenTimeMs != lastSignaledCandleOpen) {
+        lastSignaledCandleOpen = candleOpenTimeMs; // Save it so we don't re-trigger
+        return true;
+    }
+    return false;
+}

@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include "ConfigFetcher.h"
 #include "MarketAnalyzer.h"
+#include "Bitunix.h"
 
 size_t TelegramWriteCallback(void* contents, size_t size, size_t nmemb, void* userp) {
     ((std::string*)userp)->append((char*)contents, size * nmemb);
@@ -62,11 +63,38 @@ void sendTelegramAlert(const std::string& rawMessage) {
     std::cout << "[Telegram Response]: " << response << std::endl;
 }
 
+void executeOrderAndNotify(BitunixExchange& exchange, const BotParams& bot, const std::string& side, const std::string& signal_type, double rsi, double close_price) {
+    std::cout << " [TRADE EXECUTION] Initiating " << side << " order for " << bot.symbol
+              << " | Price: " << close_price << std::endl;
+
+    // Define order properties for futures trading
+    std::string order_side = side; // "BUY" or "SELL"
+    std::string position_side = (side == "BUY") ? "LONG" : "SHORT";
+    double quantity = 0.001; // Adjust or use your desired position size/amount
+
+    // Call placeOrder with all 4 expected parameters
+    bool success = exchange.placeOrder(bot.symbol, order_side, position_side, quantity);
+
+    if (success) {
+        std::cout << " [SUCCESS] " << position_side << " position created for " << bot.symbol << std::endl;
+        std::string alert = " POSITION OPENED [" + position_side + "]\n" +
+                            "Symbol: " + bot.symbol + "\n" +
+                            "Trigger: " + signal_type + "\n" +
+                            "Entry Price: $" + std::to_string(close_price) + "\n" +
+                            "RSI: " + std::to_string(rsi);
+        sendTelegramAlert(alert);
+    } else {
+        std::cerr << " [ERROR] Failed to execute " << position_side << " position on exchange!" << std::endl;
+        sendTelegramAlert(" EXECUTION FAILED\nFailed to open " + position_side + " position on " + bot.symbol);
+    }
+}
+
 int main() {
     std::cout << "[INFO] Starting Autonomous Database-Driven C++ Crypto Worker..." << std::endl;
 
     ConfigFetcher config_fetcher("http://java-api:8080");
     MarketAnalyzer market_analyzer;
+    BitunixExchange exchange;
     std::vector<BotParams> active_bots;
 
     // Startup retry loop: Wait for Java API & Database readiness
@@ -82,18 +110,15 @@ int main() {
         std::cout << "\n----------------------------------------" << std::endl;
         std::cout << "[INFO] Polling database for latest active configurations..." << std::endl;
 
-        // Hot-reload configurations on every cycle
         if (config_fetcher.fetchActiveConfigs(active_bots)) {
             std::cout << "[INFO] Active markets count: " << active_bots.size() << std::endl;
 
-            // Iterate through each active trading pair from the database
             for (const auto& bot : active_bots) {
                 std::cout << "\n[SCAN] Evaluating " << bot.symbol
                           << " | Timeframe: " << bot.timeframe
                           << " | RSI Period: " << bot.rsi_period << std::endl;
 
                 std::vector<double> closes;
-                // Fetch enough candles to safely calculate RSI (e.g., period * 3 or at least 50 candles)
                 int kline_limit = bot.rsi_period * 3;
                 if (kline_limit < 50) kline_limit = 50;
 
@@ -103,23 +128,73 @@ int main() {
                     if (rsi >= 0.0) {
                         std::cout << "       -> Current RSI (" << bot.rsi_period << "): " << rsi << std::endl;
 
-                        // Evaluate Trading Signals based on database thresholds
-                        if (rsi <= bot.rsi_oversold) {
-                            std::cout << " [SIGNAL - BUY] " << bot.symbol << " is OVERSOLD! RSI: " << rsi << std::endl;
-                            std::string alert = "BUY SIGNAL \nSymbol: " + bot.symbol +
-                                                "\nCondition: Oversold\nRSI: " + std::to_string(rsi);
-                            sendTelegramAlert(alert);
-                        } else if (rsi >= bot.rsi_overbought) {
-                            std::cout << " [SIGNAL - SELL] " << bot.symbol << " is OVERBOUGHT! RSI: " << rsi << std::endl;
-                            std::string alert = " SELL SIGNAL \nSymbol: " + bot.symbol +
-                                                "\nCondition: Overbought\nRSI: " + std::to_string(rsi);
-                            sendTelegramAlert(alert);
-                        } else {
-                            std::cout << "       -> Market neutral. Holding position." << std::endl;
-                            std::string alert = " MARKET NEUTRAL \nSymbol: " + bot.symbol +
-                                                "\nCondition: NEUTRAL\nRSI: " + std::to_string(rsi);
-                            sendTelegramAlert(alert);
+                        bool is_oversold = (rsi <= bot.rsi_oversold);
+                        bool is_overbought = (rsi >= bot.rsi_overbought);
+                        bool early_signal_fired = false;
+
+                        std::string kline_url = "https://api.binance.com/api/v3/klines?symbol=" + bot.symbol + "&interval=" + bot.timeframe + "&limit=1";
+                        std::string kline_resp = fetchUrl(kline_url);
+
+                        if (!kline_resp.empty()) {
+                            try {
+                                auto j = nlohmann::json::parse(kline_resp);
+                                if (!j.empty()) {
+                                    auto latest_candle = j[0];
+                                    long long open_time_ms = latest_candle[0].get<long long>();
+                                    double open  = std::stod(latest_candle[1].get<std::string>());
+                                    double high  = std::stod(latest_candle[2].get<std::string>());
+                                    double low   = std::stod(latest_candle[3].get<std::string>());
+                                    double close = std::stod(latest_candle[4].get<std::string>());
+
+                                    int threshold_seconds = 90;
+                                    if (bot.timeframe == "1m") threshold_seconds = 30;
+                                    else if (bot.timeframe == "3m") threshold_seconds = 90;
+                                    else if (bot.timeframe == "5m") threshold_seconds = 150;
+                                    else if (bot.timeframe == "15m") threshold_seconds = 450;
+
+                                    if (market_analyzer.sufficientTimePass(open_time_ms, threshold_seconds)) {
+
+                                        // 1. EARLY BUY (LONG POSITION)
+                                        if (market_analyzer.hammerPattern(open, high, low, close, true)) {
+                                            std::cout << " [EARLY SIGNAL - BUY] " << bot.symbol << " Bullish Hammer Detected!" << std::endl;
+                                            std::string condition = is_oversold ? "Oversold + Bullish Hammer" : "Bullish Hammer";
+
+                                            // Execute LONG order
+                                            executeOrderAndNotify(exchange, bot, "BUY", condition, rsi, close);
+                                            early_signal_fired = true;
+                                        }
+                                        // 2. EARLY SELL (SHORT POSITION)
+                                        else if (market_analyzer.hammerPattern(open, high, low, close, false)) {
+                                            std::cout << " [EARLY SIGNAL - SELL] " << bot.symbol << " Bearish Shooting Star Detected!" << std::endl;
+                                            std::string condition = is_overbought ? "Overbought + Bearish Shooting Star" : "Bearish Shooting Star";
+
+                                            // Execute SHORT order
+                                            executeOrderAndNotify(exchange, bot, "SELL", condition, rsi, close);
+                                            early_signal_fired = true;
+                                        }
+                                    }
+                                }
+                            } catch (const std::exception& e) {
+                                std::cerr << "       -> [ERROR] Failed to parse live candle: " << e.what() << std::endl;
+                            }
                         }
+
+                        // ==========================================
+                        // STANDARD RSI FALLBACK TRADE EXECUTION
+
+                        if (!early_signal_fired) {
+                            double last_close = closes.back();
+                            if (is_oversold) {
+                                std::cout << " [SIGNAL - BUY] " << bot.symbol << " is OVERSOLD! RSI: " << rsi << std::endl;
+                                executeOrderAndNotify(exchange, bot, "BUY", "Oversold RSI (No Hammer)", rsi, last_close);
+                            } else if (is_overbought) {
+                                std::cout << " [SIGNAL - SELL] " << bot.symbol << " is OVERBOUGHT! RSI: " << rsi << std::endl;
+                                executeOrderAndNotify(exchange, bot, "SELL", "Overbought RSI (No Shooting Star)", rsi, last_close);
+                            } else {
+                                std::cout << "       -> Market neutral. Holding position." << std::endl;
+                            }
+                        }
+
                     } else {
                         std::cerr << "       -> [WARNING] Insufficient data to calculate RSI." << std::endl;
                     }

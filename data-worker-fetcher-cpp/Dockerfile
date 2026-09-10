@@ -5,8 +5,10 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # Install C++ build tools and necessary libraries
 RUN apt-get update && apt-get install -y \
-    build-essential \
+    g++ \
     cmake \
+    make \
+    libssl-dev \
     libcurl4-openssl-dev \
     libpqxx-dev \
     nlohmann-json3-dev \
