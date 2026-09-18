@@ -20,6 +20,10 @@ public:
 
     // Core private method to handle the actual HTTP POST request
     bool placeOrder(const std::string& symbol, const std::string& side, const std::string& positionSide, double quantity);
+    bool placeTakeProfit(const std::string& symbol, const std::string& side,
+                         const std::string& positionSide, double quantity,
+                         double triggerPrice, std::string& orderId);
+    bool cancelTakeProfit(const std::string& symbol, const std::string& orderId);
 
 
     // Position Management Methods

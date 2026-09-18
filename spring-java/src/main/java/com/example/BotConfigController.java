@@ -34,6 +34,9 @@ public class BotConfigController{
 
         config.setParameters(newConfig.getParameters());
         config.setActive(newConfig.isActive());
+        config.setPriceStepPercentage(newConfig.getPriceStepPercentage());
+        config.setTakeProfitPercentage(newConfig.getTakeProfitPercentage());
+        config.setTradeQuantityForApi(newConfig.getTradeQuantityForApi());
 
         return ResponseEntity.ok(repo.save(config));
     }
@@ -46,11 +49,20 @@ public class BotConfigController{
                 .map(config -> new BotConfigResponse(
                         config.getSymbol(),
                         config.isActive(),
+                        config.getPriceStepPercentage(),
+                        config.getTakeProfitPercentage(),
+                        config.getTradeQuantityForApi(),
                         new BotConfigResponse.ParametersDto(
                                 config.getRsiPeriod(),
                                 config.getRsiOverbought(),
                                 config.getRsiOversold(),
-                                config.getTimeframe()
+                                config.getTimeframe(),
+                                config.getTakeProfitPct(),
+                                config.getTradeQuantity(),
+                                config.getRsiIndicators(),
+                                config.getHammerTimeframe(),
+                                config.getHammerIndicators(),
+                                config.getVolumeIndicators()
                         )
                 ))
                 .collect(Collectors.toList());

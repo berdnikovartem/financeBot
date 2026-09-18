@@ -5,6 +5,55 @@
 
 using json = nlohmann::json;
 
+namespace {
+void parseIndicatorConfig(const json& params, BotParams& config) {
+    config.rsi_indicators.clear();
+    if (params.contains("rsi_indicators") && params["rsi_indicators"].is_array()) {
+        for (const auto& item : params["rsi_indicators"]) {
+            if (config.rsi_indicators.size() == 3) break;
+            if (!item.is_object()) continue;
+            RsiConfig indicator;
+            indicator.period = item.value("period", 14);
+            indicator.overbought = item.value("overbought", 70.0);
+            indicator.oversold = item.value("oversold", 30.0);
+            indicator.timeframe = item.value("timeframe", "1h");
+            if (indicator.period > 0 && !indicator.timeframe.empty()) {
+                config.rsi_indicators.push_back(indicator);
+            }
+        }
+    }
+    if (config.rsi_indicators.empty()) {
+        config.rsi_indicators.push_back({
+            params.value("rsi_period", 14),
+            params.value("rsi_overbought", 70.0),
+            params.value("rsi_oversold", 30.0),
+            params.value("timeframe", "1h")
+        });
+    }
+    config.rsi_period = config.rsi_indicators.front().period;
+    config.rsi_overbought = config.rsi_indicators.front().overbought;
+    config.rsi_oversold = config.rsi_indicators.front().oversold;
+    config.timeframe = config.rsi_indicators.front().timeframe;
+    config.hammer_timeframe = params.value("hammer_timeframe", config.timeframe);
+    auto parsePatterns = [&params, &config](const char* key, std::vector<PatternConfig>& output) {
+        output.clear();
+        if (params.contains(key) && params[key].is_array()) {
+            for (const auto& item : params[key]) {
+                if (output.size() == 3 || !item.is_object()) break;
+                PatternConfig pattern;
+                pattern.timeframe = item.value("timeframe", "1h");
+                pattern.multiplier = item.value("multiplier", 1.5);
+                if (!pattern.timeframe.empty() && pattern.multiplier > 0.0) output.push_back(pattern);
+            }
+        }
+        if (output.empty()) output.push_back(PatternConfig{config.timeframe, 1.5});
+    };
+    parsePatterns("hammer_indicators", config.hammer_indicators);
+    parsePatterns("volume_indicators", config.volume_indicators);
+    config.hammer_timeframe = config.hammer_indicators.front().timeframe;
+}
+}
+
 ConfigFetcher::ConfigFetcher(std::string url) : api_base_url(std::move(url)) {}
 
 // with the use of libcurl libriary, creating one string that will have all data in it
@@ -49,10 +98,9 @@ bool ConfigFetcher::fetchConfig(const std::string& symbol, BotParams& config_out
         if (data.contains("parameters") && data["parameters"].is_object()) {
             auto params = data["parameters"];
 
-            config_out.rsi_overbought = params.value("rsi_overbought", 70.0);
-            config_out.rsi_oversold = params.value("rsi_oversold", 30.0);
-            config_out.rsi_period = params.value("rsi_period", 14);
-            config_out.timeframe = params.value("timeframe", "1h");
+            parseIndicatorConfig(params, config_out);
+            config_out.take_profit_pct = params.value("take_profit_pct", 0.05);
+            config_out.trade_quantity = params.value("trade_quantity", 0.001);
         }
 
         return true;
@@ -96,13 +144,9 @@ bool ConfigFetcher::fetchActiveConfigs(std::vector<BotParams>& configs_out) {
 
             if (item.contains("parameters") && item["parameters"].is_object()) {
                 auto params = item["parameters"];
-                config.rsi_period = params.value("rsi_period", 14);
-                config.rsi_overbought = params.value("rsi_overbought", 70.0);
-                config.rsi_oversold = params.value("rsi_oversold", 30.0);
-                config.timeframe = params.value("timeframe", "1h");
-                //config.stop_loss_pct = params.value("stop_loss_pct", 0.02);
-                //config.take_profit_pct = params.value("take_profit_pct", 0.05);
-                //config.trade_amount_usdt = params.value("trade_amount_usdt", 100.0);
+                parseIndicatorConfig(params, config);
+                config.take_profit_pct = params.value("take_profit_pct", 0.05);
+                config.trade_quantity = params.value("trade_quantity", 0.001);
             }
             configs_out.push_back(config);
         }
@@ -111,4 +155,3 @@ bool ConfigFetcher::fetchActiveConfigs(std::vector<BotParams>& configs_out) {
         return false;
     }
 }
-

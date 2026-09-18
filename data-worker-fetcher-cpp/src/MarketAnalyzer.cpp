@@ -1,5 +1,6 @@
 #include "MarketAnalyzer.h"
 #include <iostream>
+#include <numeric>
 #include <curl/curl.h>
 #include <nlohmann/json.hpp>
 
@@ -11,45 +12,57 @@ size_t MarketAnalyzer::WriteCallback(void *contents, size_t size, size_t nmemb, 
 }
 
 bool MarketAnalyzer::fetchClosingPrices(const std::string& symbol, const std::string& timeframe, int limit, std::vector<double>& closes_out) {
-    CURL* curl;
-    CURLcode res;
-    std::string readBuffer;
-
-    std::string endpoint = "https://api.binance.com/api/v3/klines?symbol=" + symbol + "&interval=" + timeframe + "&limit=" + std::to_string(limit);
-
-    curl = curl_easy_init();
+    CURL* curl = curl_easy_init();
     if (!curl) return false;
-
+    std::string readBuffer;
+    const std::string endpoint = "https://api.binance.com/api/v3/klines?symbol=" + symbol +
+                                 "&interval=" + timeframe + "&limit=" + std::to_string(limit);
     curl_easy_setopt(curl, CURLOPT_URL, endpoint.c_str());
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L);
-
-    res = curl_easy_perform(curl);
-    long http_code = 0;
-    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+    const CURLcode res = curl_easy_perform(curl);
+    long httpCode = 0;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpCode);
     curl_easy_cleanup(curl);
-
-    if (res != CURLE_OK || http_code != 200) {
-        std::cerr << "ERROR Failed to fetch Binance klines for " << symbol << " (HTTP: " << http_code << ")" << std::endl;
-        return false;
-    }
-
+    if (res != CURLE_OK || httpCode != 200) return false;
     try {
-        json klines = json::parse(readBuffer);
-        closes_out.clear();
-
+        const auto klines = json::parse(readBuffer);
         if (!klines.is_array()) return false;
-
+        closes_out.clear();
         for (const auto& kline : klines) {
-            if (kline.is_array() && kline.size() > 4) {
-                std::string close_str = kline[4].get<std::string>();
-                closes_out.push_back(std::stod(close_str));
-            }
+            if (kline.is_array() && kline.size() > 4) closes_out.push_back(std::stod(kline[4].get<std::string>()));
         }
         return true;
     } catch (const std::exception& e) {
         std::cerr << "ERROR JSON parse error on klines for " << symbol << ": " << e.what() << std::endl;
+        return false;
+    }
+}
+
+bool MarketAnalyzer::fetchVolumeSurge(const std::string& symbol, const std::string& timeframe, double surge_multiplier) {
+    CURL* curl = curl_easy_init();
+    if (!curl) return false;
+    std::string buffer;
+    const std::string endpoint = "https://api.binance.com/api/v3/klines?symbol=" + symbol + "&interval=" + timeframe + "&limit=21";
+    curl_easy_setopt(curl, CURLOPT_URL, endpoint.c_str());
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buffer);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L);
+    const CURLcode res = curl_easy_perform(curl);
+    curl_easy_cleanup(curl);
+    if (res != CURLE_OK) return false;
+    try {
+        const auto klines = json::parse(buffer);
+        std::vector<double> volumes;
+        for (const auto& kline : klines) {
+            if (kline.is_array() && kline.size() > 5) volumes.push_back(std::stod(kline[5].get<std::string>()));
+        }
+        if (volumes.size() < 2) return false;
+        const double average = std::accumulate(volumes.begin(), volumes.end() - 1, 0.0) / (volumes.size() - 1);
+        return volumeSurge(volumes.back(), average, surge_multiplier);
+    } catch (const std::exception& e) {
+        std::cerr << "ERROR volume JSON parse for " << symbol << ": " << e.what() << std::endl;
         return false;
     }
 }
@@ -91,7 +104,7 @@ double MarketAnalyzer::calculateWildersRSI(const std::vector<double>& closes, in
     return 100.0 - (100.0 / (1.0 + rs));
 }
 
-bool MarketAnalyzer::hammerPattern(double open, double high, double low, double close, bool side) {
+bool MarketAnalyzer::hammerPattern(double open, double high, double low, double close, bool side, double multiplier) {
     double body = std::abs(open - close);
     double upperShadow = high - std::max(open, close);
     double lowerShadow = std::min(open, close) - low;
@@ -101,12 +114,12 @@ bool MarketAnalyzer::hammerPattern(double open, double high, double low, double 
 
     if (side) {
         // Bullish Hammer
-        bool longLowerShadow = lowerShadow >= (1.5 * body);
+        bool longLowerShadow = lowerShadow >= (multiplier * body);
         //bool tinyUpperShadow = upperShadow <= (0.10 * totalCandleSize);
         return longLowerShadow; //&& tinyUpperShadow;
     } else {
         // Bearish Shooting Star
-        bool longUpperShadow = upperShadow >= (1.5 * body);
+        bool longUpperShadow = upperShadow >= (multiplier * body);
         //bool tinyLowerShadow = lowerShadow <= (0.10 * totalCandleSize);
         return longUpperShadow; //&& tinyLowerShadow;
     }

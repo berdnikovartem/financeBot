@@ -13,12 +13,13 @@ public:
 
     //method to get closing prices out of BINANCE exchange
     bool fetchClosingPrices(const std::string& symbol, const std::string& timeframe, int limit, std::vector<double>& closes_out);
+    bool fetchVolumeSurge(const std::string& symbol, const std::string& timeframe, double surge_multiplier);
 
     //method to calculate the RSI
     double calculateWildersRSI(const std::vector<double>& closes, int period);
 
     // Hammer pattern recognition (supports bullish bottom hammer or bearish shooting star)
-    bool hammerPattern(double open, double high, double low, double close, bool side);
+    bool hammerPattern(double open, double high, double low, double close, bool side, double multiplier = 1.5);
 
     // Volume surge recognition
     bool volumeSurge(double currentVolume, double averageVolume, double surgeMultiplier = 1.5);

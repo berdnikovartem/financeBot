@@ -2,13 +2,29 @@
 #include <string>
 #include <vector>
 
+struct RsiConfig {
+    int period = 14;
+    double overbought = 70.0;
+    double oversold = 30.0;
+    std::string timeframe = "1h";
+};
+struct PatternConfig { std::string timeframe = "1h"; double multiplier = 1.5; };
+
 struct BotParams { //basic values
     std::string symbol;
     bool active = false;
+    std::vector<RsiConfig> rsi_indicators;
+    std::vector<PatternConfig> hammer_indicators;
+    std::vector<PatternConfig> volume_indicators;
+    std::string hammer_timeframe = "1h";
+
+    // Legacy single-RSI fields retained for compatibility with existing callers.
     int rsi_period = 14;
     double rsi_overbought = 70.0;
     double rsi_oversold = 30.0;
     std::string timeframe = "1h";
+    double take_profit_pct = 0.05;
+    double trade_quantity = 0.001;
 };
 
 class ConfigFetcher {

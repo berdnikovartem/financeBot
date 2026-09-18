@@ -10,9 +10,13 @@ services:
     depends_on:
       - db
     environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/artem
-      SPRING_DATASOURCE_USERNAME: artem
-      SPRING_DATASOURCE_PASSWORD: 123456
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-artem}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-artem}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-123456}
+      APP_JWT_SECRET: ${APP_JWT_SECRET:?APP_JWT_SECRET must be set}
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?APP_ENCRYPTION_KEY must be set}
+      APP_COOKIES_SECURE: ${APP_COOKIES_SECURE:-false}
+      APP_WORKER_SERVICE_TOKEN: ${APP_WORKER_SERVICE_TOKEN:?APP_WORKER_SERVICE_TOKEN must be set}
     networks:
       - bot-network
 
@@ -27,14 +31,25 @@ services:
     networks:
       - bot-network
 
+  web:
+    build: ./web
+    container_name: finance_bot_web
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - app
+    networks:
+      - bot-network
+
   db:
     image: postgres:16-alpine
     container_name: finance_bot_db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: artem
-      POSTGRES_PASSWORD: "123456"
-      POSTGRES_DB: artem
+      POSTGRES_USER: ${POSTGRES_USER:-artem}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-123456}
+      POSTGRES_DB: ${POSTGRES_DB:-artem}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
@@ -42,7 +57,7 @@ services:
     networks:
       - bot-network
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U artem -d artem" ]
+      test: [ "CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}" ]
       interval: 5s
       timeout: 5s
       retries: 5
