@@ -91,7 +91,7 @@ double MarketAnalyzer::calculateWildersRSI(const std::vector<double>& closes, in
     return 100.0 - (100.0 / (1.0 + rs));
 }
 
-bool MarketAnalyzer::hammerPattern(double open, double high, double low, double close, bool side) {
+bool MarketAnalyzer::hammerPattern(double open, double high, double low, double close, bool side, double multiplier) {
     double body = std::abs(open - close);
     double upperShadow = high - std::max(open, close);
     double lowerShadow = std::min(open, close) - low;
@@ -101,12 +101,12 @@ bool MarketAnalyzer::hammerPattern(double open, double high, double low, double 
 
     if (side) {
         // Bullish Hammer
-        bool longLowerShadow = lowerShadow >= (1.5 * body);
+        bool longLowerShadow = lowerShadow >= (multiplier * body);
         //bool tinyUpperShadow = upperShadow <= (0.10 * totalCandleSize);
         return longLowerShadow; //&& tinyUpperShadow;
     } else {
         // Bearish Shooting Star
-        bool longUpperShadow = upperShadow >= (1.5 * body);
+        bool longUpperShadow = upperShadow >= (multiplier * body);
         //bool tinyLowerShadow = lowerShadow <= (0.10 * totalCandleSize);
         return longUpperShadow; //&& tinyLowerShadow;
     }
@@ -117,7 +117,7 @@ bool MarketAnalyzer::volumeSurge(double currentVolume, double averageVolume, dou
     return currentVolume >= (averageVolume * surgeMultiplier);
 }
 
-bool MarketAnalyzer::sufficientTimePass(long long candleOpenTimeMs, int thresholdSeconds) {
+bool MarketAnalyzer::sufficientTimePass(const std::string& symbol, long long candleOpenTimeMs, int thresholdSeconds) {
     long long currentTimestampMs = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch()
     ).count();
@@ -125,9 +125,9 @@ bool MarketAnalyzer::sufficientTimePass(long long candleOpenTimeMs, int threshol
     long long elapsedMs = currentTimestampMs - candleOpenTimeMs;
     long long thresholdMs = thresholdSeconds * 1000LL;
 
-    if (elapsedMs >= thresholdMs && candleOpenTimeMs != lastSignaledCandleOpen) {
-        lastSignaledCandleOpen = candleOpenTimeMs; // Save it so we don't re-trigger
-        return true;
-    }
-    return false;
+    return elapsedMs >= thresholdMs && lastSignaledCandles[symbol] != candleOpenTimeMs;
+}
+
+void MarketAnalyzer::markCandleSignaled(const std::string& symbol, long long candleOpenTimeMs) {
+    lastSignaledCandles[symbol] = candleOpenTimeMs;
 }

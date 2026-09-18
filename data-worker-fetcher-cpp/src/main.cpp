@@ -3,6 +3,9 @@
 #include <vector>
 #include <thread>
 #include <chrono>
+#include <cmath>
+#include <unordered_map>
+#include <unordered_set>
 #include <curl/curl.h>
 #include <pqxx/pqxx>
 #include <nlohmann/json.hpp>
@@ -63,17 +66,104 @@ void sendTelegramAlert(const std::string& rawMessage) {
     std::cout << "[Telegram Response]: " << response << std::endl;
 }
 
-void executeOrderAndNotify(BitunixExchange& exchange, const BotParams& bot, const std::string& side, const std::string& signal_type, double rsi, double close_price) {
+// --- HELPER: Struct to hold full candlestick data ---
+struct Candle {
+    long long openTimeMs;
+    double open;
+    double high;
+    double low;
+    double close;
+    double volume;
+};
+
+// --- HELPER: cURL write callback ---
+static size_t WriteCallbackHelper(void* contents, size_t size, size_t nmemb, void* userp) {
+    ((std::string*)userp)->append((char*)contents, size * nmemb);
+    return size * nmemb;
+}
+
+// --- HELPER: Fetch OHLC data for patterns and timestamps ---
+std::vector<Candle> fetchFullCandles(const std::string& symbol, const std::string& timeframe, int limit) {
+    std::vector<Candle> candles;
+    CURL* curl = curl_easy_init();
+    if (!curl) return candles;
+
+    std::string readBuffer;
+    std::string endpoint = "https://api.binance.com/api/v3/klines?symbol=" + symbol + "&interval=" + timeframe + "&limit=" + std::to_string(limit);
+
+    curl_easy_setopt(curl, CURLOPT_URL, endpoint.c_str());
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallbackHelper);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L);
+
+    CURLcode res = curl_easy_perform(curl);
+    curl_easy_cleanup(curl);
+
+    if (res == CURLE_OK) {
+        try {
+            // EXPLICITLY using nlohmann::json to prevent scope/template compilation errors
+            nlohmann::json klinesJson = nlohmann::json::parse(readBuffer);
+            if (klinesJson.is_array()) {
+                for (const auto& kline : klinesJson) {
+                    if (kline.is_array() && kline.size() >= 6) {
+                        Candle c;
+                        c.openTimeMs = kline[0].get<long long>();
+                        c.open       = std::stod(kline[1].get<std::string>());
+                        c.high       = std::stod(kline[2].get<std::string>());
+                        c.low        = std::stod(kline[3].get<std::string>());
+                        c.close      = std::stod(kline[4].get<std::string>());
+                        c.volume     = std::stod(kline[5].get<std::string>());
+                        candles.push_back(c);
+                    }
+                }
+            }
+        } catch (...) {} // Ignore JSON parse errors and return whatever was successfully parsed
+    }
+    return candles;
+}
+
+// --- HELPER: Determine sufficient time threshold ---
+int getThresholdSeconds(const std::string& timeframe) {
+    if (timeframe == "1m") return 30;
+    if (timeframe == "3m") return 90;
+    if (timeframe == "5m") return 150;
+    if (timeframe == "15m") return 450;
+    if (timeframe == "1h") return 1800;
+    if (timeframe == "4h") return 7200;
+    return 60; // Default fallback
+}
+
+// --- TRADE EXECUTION ROUTINE ---
+bool executeOrderAndNotify(BitunixExchange& exchange, const BotParams& bot, const std::string& side,
+                           const std::string& signal_type, double rsi, double close_price) {
     std::cout << " [TRADE EXECUTION] Initiating " << side << " order for " << bot.symbol
               << " | Price: " << close_price << std::endl;
 
-    // Define order properties for futures trading
-    std::string order_side = side; // "BUY" or "SELL"
-    std::string position_side = (side == "BUY") ? "LONG" : "SHORT";
-    double quantity = 0.001; // Adjust or use your desired position size/amount
+    std::string order_side = side;
+    std::string position_side;
+    if (signal_type == "Take profit on long position") {
+        position_side = "LONG";
+    } else if (signal_type == "Take profit on short position") {
+        position_side = "SHORT";
+    } else {
+        position_side = (side == "BUY") ? "LONG" : "SHORT";
+    }
+    double quantity = bot.trade_quantity;
+    double maxQuantity = 1.0;
+    try {
+        if (const char* configuredMax = std::getenv("MAX_TRADE_QUANTITY")) maxQuantity = std::stod(configuredMax);
+    } catch (const std::exception&) {
+        std::cerr << " [ERROR] Invalid TRADE_QUANTITY or MAX_TRADE_QUANTITY." << std::endl;
+        return false;
+    }
+    if (!std::isfinite(quantity) || !std::isfinite(maxQuantity) || quantity <= 0.0 || quantity > maxQuantity || maxQuantity <= 0.0) {
+        std::cerr << " [ERROR] Refusing order outside the configured quantity limit: quantity="
+                  << quantity << ", max=" << maxQuantity << std::endl;
+        return false;
+    }
 
-    // Call placeOrder with all 4 expected parameters
-    bool success = exchange.placeOrder(bot.symbol, order_side, position_side, quantity);
+    bool opening = signal_type.rfind("Take profit", 0) != 0;
+    bool success = exchange.placeOrder(bot.symbol, order_side, position_side, quantity, opening);
 
     if (success) {
         std::cout << " [SUCCESS] " << position_side << " position created for " << bot.symbol << std::endl;
@@ -83,127 +173,259 @@ void executeOrderAndNotify(BitunixExchange& exchange, const BotParams& bot, cons
                             "Entry Price: $" + std::to_string(close_price) + "\n" +
                             "RSI: " + std::to_string(rsi);
         sendTelegramAlert(alert);
+        return true;
     } else {
         std::cerr << " [ERROR] Failed to execute " << position_side << " position on exchange!" << std::endl;
-        sendTelegramAlert(" EXECUTION FAILED\nFailed to open " + position_side + " position on " + bot.symbol);
+        return false;
     }
 }
 
 int main() {
-    std::cout << "[INFO] Starting Autonomous Database-Driven C++ Crypto Worker..." << std::endl;
+    std::cout << "Starting Crypto Trading Worker..." << std::endl;
 
-    ConfigFetcher config_fetcher("http://java-api:8080");
-    MarketAnalyzer market_analyzer;
     BitunixExchange exchange;
-    std::vector<BotParams> active_bots;
+    MarketAnalyzer analyzer;
 
-    // Startup retry loop: Wait for Java API & Database readiness
-    while (!config_fetcher.fetchActiveConfigs(active_bots) || active_bots.empty()) {
-        std::cout << "[INFO] Waiting for active trading pairs from database..." << std::endl;
-        std::this_thread::sleep_for(std::chrono::seconds(3));
+    // NOTE: Make sure this matches your internal Docker network URL for the Java API
+    ConfigFetcher fetcher("http://java-api:8080");
+
+    if (std::getenv("WORKER_REFRESH_TOKEN") && !fetcher.refreshAccessToken()) {
+        std::cerr << " [ERROR] Unable to refresh worker access token." << std::endl;
     }
+    WorkerSession workerSession;
+    bool credentialsLoaded = fetcher.fetchWorkerSession(workerSession);
+    if (credentialsLoaded) {
+        exchange.setCredentials(workerSession.apiKey, workerSession.apiSecret);
+    } else {
+        std::cerr << " [ERROR] Unable to fetch the authenticated user's Bitunix credentials. Trading is disabled until credentials load." << std::endl;
+    }
+    auto lastCredentialRefresh = std::chrono::steady_clock::now() - std::chrono::minutes(1);
+    std::unordered_set<std::string> configuredTakeProfits;
+    std::unordered_map<std::string, int> missingPositionPolls;
 
-    std::cout << "[INFO] Initial sync complete. Tracking " << active_bots.size() << " market(s)." << std::endl;
-
-    // Main continuous autonomous loop
     while (true) {
-        std::cout << "\n----------------------------------------" << std::endl;
-        std::cout << "[INFO] Polling database for latest active configurations..." << std::endl;
-
-        if (config_fetcher.fetchActiveConfigs(active_bots)) {
-            std::cout << "[INFO] Active markets count: " << active_bots.size() << std::endl;
-
-            for (const auto& bot : active_bots) {
-                std::cout << "\n[SCAN] Evaluating " << bot.symbol
-                          << " | Timeframe: " << bot.timeframe
-                          << " | RSI Period: " << bot.rsi_period << std::endl;
-
-                std::vector<double> closes;
-                int kline_limit = bot.rsi_period * 3;
-                if (kline_limit < 50) kline_limit = 50;
-
-                if (market_analyzer.fetchClosingPrices(bot.symbol, bot.timeframe, kline_limit, closes)) {
-                    double rsi = market_analyzer.calculateWildersRSI(closes, bot.rsi_period);
-
-                    if (rsi >= 0.0) {
-                        std::cout << "       -> Current RSI (" << bot.rsi_period << "): " << rsi << std::endl;
-
-                        bool is_oversold = (rsi <= bot.rsi_oversold);
-                        bool is_overbought = (rsi >= bot.rsi_overbought);
-                        bool early_signal_fired = false;
-
-                        std::string kline_url = "https://api.binance.com/api/v3/klines?symbol=" + bot.symbol + "&interval=" + bot.timeframe + "&limit=1";
-                        std::string kline_resp = fetchUrl(kline_url);
-
-                        if (!kline_resp.empty()) {
-                            try {
-                                auto j = nlohmann::json::parse(kline_resp);
-                                if (!j.empty()) {
-                                    auto latest_candle = j[0];
-                                    long long open_time_ms = latest_candle[0].get<long long>();
-                                    double open  = std::stod(latest_candle[1].get<std::string>());
-                                    double high  = std::stod(latest_candle[2].get<std::string>());
-                                    double low   = std::stod(latest_candle[3].get<std::string>());
-                                    double close = std::stod(latest_candle[4].get<std::string>());
-
-                                    int threshold_seconds = 90;
-                                    if (bot.timeframe == "1m") threshold_seconds = 30;
-                                    else if (bot.timeframe == "3m") threshold_seconds = 90;
-                                    else if (bot.timeframe == "5m") threshold_seconds = 150;
-                                    else if (bot.timeframe == "15m") threshold_seconds = 450;
-
-                                    if (market_analyzer.sufficientTimePass(open_time_ms, threshold_seconds)) {
-
-                                        // 1. EARLY BUY (LONG POSITION)
-                                        if (market_analyzer.hammerPattern(open, high, low, close, true)) {
-                                            std::cout << " [EARLY SIGNAL - BUY] " << bot.symbol << " Bullish Hammer Detected!" << std::endl;
-                                            std::string condition = is_oversold ? "Oversold + Bullish Hammer" : "Bullish Hammer";
-
-                                            // Execute LONG order
-                                            executeOrderAndNotify(exchange, bot, "BUY", condition, rsi, close);
-                                            early_signal_fired = true;
-                                        }
-                                        // 2. EARLY SELL (SHORT POSITION)
-                                        else if (market_analyzer.hammerPattern(open, high, low, close, false)) {
-                                            std::cout << " [EARLY SIGNAL - SELL] " << bot.symbol << " Bearish Shooting Star Detected!" << std::endl;
-                                            std::string condition = is_overbought ? "Overbought + Bearish Shooting Star" : "Bearish Shooting Star";
-
-                                            // Execute SHORT order
-                                            executeOrderAndNotify(exchange, bot, "SELL", condition, rsi, close);
-                                            early_signal_fired = true;
-                                        }
-                                    }
-                                }
-                            } catch (const std::exception& e) {
-                                std::cerr << "       -> [ERROR] Failed to parse live candle: " << e.what() << std::endl;
-                            }
-                        }
-
-                        // ==========================================
-                        // STANDARD RSI FALLBACK TRADE EXECUTION
-
-                        if (!early_signal_fired) {
-                            double last_close = closes.back();
-                            if (is_oversold) {
-                                std::cout << " [SIGNAL - BUY] " << bot.symbol << " is OVERSOLD! RSI: " << rsi << std::endl;
-                                executeOrderAndNotify(exchange, bot, "BUY", "Oversold RSI (No Hammer)", rsi, last_close);
-                            } else if (is_overbought) {
-                                std::cout << " [SIGNAL - SELL] " << bot.symbol << " is OVERBOUGHT! RSI: " << rsi << std::endl;
-                                executeOrderAndNotify(exchange, bot, "SELL", "Overbought RSI (No Shooting Star)", rsi, last_close);
-                            } else {
-                                std::cout << "       -> Market neutral. Holding position." << std::endl;
-                            }
-                        }
-
-                    } else {
-                        std::cerr << "       -> [WARNING] Insufficient data to calculate RSI." << std::endl;
-                    }
+        try {
+            if (!credentialsLoaded) {
+                WorkerSession retrySession;
+                credentialsLoaded = fetcher.fetchWorkerSession(retrySession);
+                if (credentialsLoaded) {
+                    exchange.setCredentials(retrySession.apiKey, retrySession.apiSecret);
+                    std::cout << " [WORKER SESSION] Bitunix credentials loaded successfully." << std::endl;
+                }
+                lastCredentialRefresh = std::chrono::steady_clock::now();
+            } else if (std::chrono::steady_clock::now() - lastCredentialRefresh >= std::chrono::minutes(1)) {
+                WorkerSession refreshedSession;
+                credentialsLoaded = fetcher.fetchWorkerSession(refreshedSession);
+                if (credentialsLoaded) {
+                    exchange.setCredentials(refreshedSession.apiKey, refreshedSession.apiSecret);
+                    std::cout << " [WORKER SESSION] Bitunix credentials refreshed from the API." << std::endl;
                 } else {
-                    std::cerr << "       -> [ERROR] Failed to fetch market klines." << std::endl;
+                    std::cerr << " [ERROR] Bitunix credentials could not be refreshed. Trading is paused." << std::endl;
+                }
+                lastCredentialRefresh = std::chrono::steady_clock::now();
+            }
+            if (!credentialsLoaded) {
+                std::cerr << " [WARNING] Trading loop paused until Java API is reachable and Bitunix credentials load." << std::endl;
+                std::this_thread::sleep_for(std::chrono::seconds(10));
+                continue;
+            }
+            std::vector<BotParams> bots;
+            bool fetchSuccess = fetcher.fetchActiveConfigs(bots);
+
+            if (!fetchSuccess) {
+                std::cerr << " [WARNING] Failed to fetch bot configs from Java API." << std::endl;
+            } else {
+                for (const auto& bot : bots) {
+
+                    std::cout << " [MONITORING] " << bot.symbol << " | RSI period: " << bot.rsi_period
+                              << " | oversold: " << bot.rsi_oversold << " | overbought: " << bot.rsi_overbought
+                              << " | side: " << bot.trading_side << std::endl;
+
+                    int limit = std::max(50, bot.rsi_period * 3);
+
+                    // Fetch FULL candlestick data (OHLC + time)
+                    std::vector<Candle> candles = fetchFullCandles(bot.symbol, bot.timeframe, limit);
+
+                    if (candles.empty()) {
+                        std::cerr << " [WARNING] No kline data returned for " << bot.symbol << std::endl;
+                        continue;
+                    }
+
+                    // Extract just the closing prices to feed into your Wilders RSI calculator
+                    std::vector<double> closes;
+                    for (const auto& c : candles) {
+                        closes.push_back(c.close);
+                    }
+
+                    // 1. Calculate RSI
+                    double rsi = analyzer.calculateWildersRSI(closes, bot.rsi_period);
+
+                    Candle currentCandle = candles.back();
+                    int thresholdSeconds = getThresholdSeconds(bot.timeframe);
+
+                    std::vector<BitunixPosition> positions;
+                    if (!exchange.fetchPositions(bot.symbol, positions)) {
+                        std::cerr << " [WARNING] Could not reconcile " << bot.symbol << " with Bitunix." << std::endl;
+                        continue;
+                    }
+
+                    const BitunixPosition* longPosition = nullptr;
+                    const BitunixPosition* shortPosition = nullptr;
+                    for (const auto& position : positions) {
+                        if (position.side == "LONG") longPosition = &position;
+                        if (position.side == "SHORT") shortPosition = &position;
+                    }
+
+                    // The exchange is authoritative after restarts, manual trades, or partial fills.
+                    std::string longPositionKey = bot.symbol + ":LONG";
+                    std::string shortPositionKey = bot.symbol + ":SHORT";
+                    if (longPosition) {
+                        missingPositionPolls.erase(longPositionKey);
+                    } else if (bot.last_long_price > 0.0) {
+                        int missingPolls = ++missingPositionPolls[longPositionKey];
+                        if (missingPolls >= 3) {
+                            fetcher.updateLastTradePrice(bot.id, "LONG", 0.0);
+                            std::cout << " [RECONCILIATION] Cleared stale LONG state for " << bot.symbol
+                                      << " after " << missingPolls << " missing position polls" << std::endl;
+                            missingPositionPolls.erase(longPositionKey);
+                        } else {
+                            std::cout << " [RECONCILIATION] Bitunix has not reported LONG " << bot.symbol
+                                      << " yet (poll " << missingPolls << "/3); keeping state" << std::endl;
+                        }
+                    }
+                    if (shortPosition) {
+                        missingPositionPolls.erase(shortPositionKey);
+                    } else if (bot.last_short_price > 0.0) {
+                        int missingPolls = ++missingPositionPolls[shortPositionKey];
+                        if (missingPolls >= 3) {
+                            fetcher.updateLastTradePrice(bot.id, "SHORT", 0.0);
+                            std::cout << " [RECONCILIATION] Cleared stale SHORT state for " << bot.symbol
+                                      << " after " << missingPolls << " missing position polls" << std::endl;
+                            missingPositionPolls.erase(shortPositionKey);
+                        } else {
+                            std::cout << " [RECONCILIATION] Bitunix has not reported SHORT " << bot.symbol
+                                      << " yet (poll " << missingPolls << "/3); keeping state" << std::endl;
+                        }
+                    }
+                    double longAveragePrice = longPosition ? longPosition->averageOpenPrice : bot.last_long_price;
+                    double shortAveragePrice = shortPosition ? shortPosition->averageOpenPrice : bot.last_short_price;
+                    if (bot.take_profit_percentage > 0.0 && longPosition) {
+                        double target = longAveragePrice * (1.0 + bot.take_profit_percentage / 100.0);
+                        if (configuredTakeProfits.find(longPosition->positionId) == configuredTakeProfits.end()
+                            && exchange.placeTakeProfit(*longPosition, target)) {
+                            configuredTakeProfits.insert(longPosition->positionId);
+                        }
+                    }
+                    if (bot.take_profit_percentage > 0.0 && shortPosition) {
+                        double target = shortAveragePrice * (1.0 - bot.take_profit_percentage / 100.0);
+                        if (configuredTakeProfits.find(shortPosition->positionId) == configuredTakeProfits.end()
+                            && exchange.placeTakeProfit(*shortPosition, target)) {
+                            configuredTakeProfits.insert(shortPosition->positionId);
+                        }
+                    }
+
+                    // 2. Check sufficient time pass
+                    if (credentialsLoaded && analyzer.sufficientTimePass(bot.symbol, currentCandle.openTimeMs, thresholdSeconds)) {
+
+                        bool isOversold = (rsi <= bot.rsi_oversold);
+                        bool isOverbought = (rsi >= bot.rsi_overbought);
+
+                        // 3. Calculate Hammer / Shooting Star (true = Bullish, false = Bearish)
+                        bool isHammer = analyzer.hammerPattern(currentCandle.open, currentCandle.high, currentCandle.low, currentCandle.close, true, bot.hammer_multiplier);
+                        bool isShootingStar = analyzer.hammerPattern(currentCandle.open, currentCandle.high, currentCandle.low, currentCandle.close, false, bot.hammer_multiplier);
+
+                        double averageVolume = 0.0;
+                        int volumeSamples = 0;
+                        for (size_t index = candles.size() > 21 ? candles.size() - 21 : 0; index + 1 < candles.size(); ++index) {
+                            averageVolume += candles[index].volume;
+                            ++volumeSamples;
+                        }
+                        averageVolume = volumeSamples > 0 ? averageVolume / volumeSamples : 0.0;
+                        bool hasVolumeSurge = analyzer.volumeSurge(currentCandle.volume, averageVolume, bot.volume_surge_multiplier);
+
+                        double currentPrice = currentCandle.close;
+                        double stepPct = bot.price_step_percentage / 100.0;
+                        double takeProfitPct = bot.take_profit_percentage / 100.0;
+
+                        bool longTakeProfitHit = (longAveragePrice > 0.0) && (currentPrice >= longAveragePrice * (1.0 + takeProfitPct));
+                        bool shortTakeProfitHit = (shortAveragePrice > 0.0) && (currentPrice <= shortAveragePrice * (1.0 - takeProfitPct));
+
+                        if (longAveragePrice > 0.0 && bot.take_profit_percentage > 0.0) {
+                            std::cout << " [" << bot.symbol << "] LONG take-profit target: "
+                                      << longAveragePrice * (1.0 + takeProfitPct)
+                                      << " | current: " << currentPrice << std::endl;
+                        }
+                        if (shortAveragePrice > 0.0 && bot.take_profit_percentage > 0.0) {
+                            std::cout << " [" << bot.symbol << "] SHORT take-profit target: "
+                                      << shortAveragePrice * (1.0 - takeProfitPct)
+                                      << " | current: " << currentPrice << std::endl;
+                        }
+
+                        // 4. Calculate DCA grid distance
+                        bool longStepCleared = (longAveragePrice == 0.0) ||
+                                               (currentPrice <= longAveragePrice * (1.0 - stepPct));
+
+                        bool shortStepCleared = (shortAveragePrice == 0.0) ||
+                                                (currentPrice >= shortAveragePrice * (1.0 + stepPct));
+
+                        // --- EXECUTION LOGIC ---
+                        bool longAllowed = bot.trading_side == "LONG" || bot.trading_side == "BOTH";
+                        bool shortAllowed = bot.trading_side == "SHORT" || bot.trading_side == "BOTH";
+
+                        if (longAllowed && longTakeProfitHit && longPosition
+                            && configuredTakeProfits.find(longPosition->positionId) == configuredTakeProfits.end()) {
+                            BotParams closeBot = bot;
+                            closeBot.trade_quantity = longPosition->quantity;
+                            if (executeOrderAndNotify(exchange, closeBot, "SELL", "Take profit on long position", 0.0, currentPrice)) {
+                                fetcher.updateLastTradePrice(bot.id, "LONG", 0.0);
+                                analyzer.markCandleSignaled(bot.symbol, currentCandle.openTimeMs);
+                            }
+                        }
+                        else if (shortAllowed && shortTakeProfitHit && shortPosition
+                            && configuredTakeProfits.find(shortPosition->positionId) == configuredTakeProfits.end()) {
+                            BotParams closeBot = bot;
+                            closeBot.trade_quantity = shortPosition->quantity;
+                            if (executeOrderAndNotify(exchange, closeBot, "BUY", "Take profit on short position", 0.0, currentPrice)) {
+                                fetcher.updateLastTradePrice(bot.id, "SHORT", 0.0);
+                                analyzer.markCandleSignaled(bot.symbol, currentCandle.openTimeMs);
+                            }
+                        }
+                        else if (longAllowed && isOversold && isHammer && hasVolumeSurge) {
+                            if (longStepCleared) {
+                                if (executeOrderAndNotify(exchange, bot, "BUY", "RSI Oversold + Bullish Hammer", rsi, currentPrice)) {
+                                    fetcher.updateLastTradePrice(bot.id, "LONG", currentPrice);
+                                    analyzer.markCandleSignaled(bot.symbol, currentCandle.openTimeMs);
+                                }
+                            } else {
+                                std::cout << " [" << bot.symbol << "] LONG condition met, but price (" << currentPrice
+                                          << ") hasn't dropped " << bot.price_step_percentage
+                                          << "% from last entry (" << bot.last_long_price << ")." << std::endl;
+                            }
+                        }
+                        else if (shortAllowed && isOverbought && isShootingStar && hasVolumeSurge) {
+                            if (shortStepCleared) {
+                                if (executeOrderAndNotify(exchange, bot, "SELL", "RSI Overbought + Bearish Shooting Star", rsi, currentPrice)) {
+                                    fetcher.updateLastTradePrice(bot.id, "SHORT", currentPrice);
+                                    analyzer.markCandleSignaled(bot.symbol, currentCandle.openTimeMs);
+                                }
+                            } else {
+                                std::cout << " [" << bot.symbol << "] SHORT condition met, but price (" << currentPrice
+                                          << ") hasn't risen " << bot.price_step_percentage
+                                          << "% from last entry (" << bot.last_short_price << ")." << std::endl;
+                            }
+                        }
+                        else {
+                            std::cout << " [" << bot.symbol << "] Holding. RSI: " << rsi
+                                      << " | Hammer: " << (isHammer ? "Yes" : "No")
+                                      << " | Shooting Star: " << (isShootingStar ? "Yes" : "No")
+                                      << " | Volume surge: " << (hasVolumeSurge ? "Yes" : "No")
+                                      << std::endl;
+                        }
+                    }
                 }
             }
-        } else {
-            std::cerr << "[WARNING] Failed to sync active configs from API. Retrying next cycle..." << std::endl;
+        } catch (const std::exception& e) {
+            std::cerr << " [FATAL ERROR] Exception in main loop: " << e.what() << std::endl;
         }
 
         std::this_thread::sleep_for(std::chrono::seconds(10));

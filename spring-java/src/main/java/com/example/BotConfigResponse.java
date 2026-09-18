@@ -1,46 +1,100 @@
 package com.example;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 public class BotConfigResponse {
+    private Long id;
     private String symbol;
     private boolean active;
+    private Double priceStepPercentage;
+    private Double takeProfitPercentage;
+    private Double tradeQuantity;
+    private Double lastLongPrice;
+    private Double lastShortPrice;
     private ParametersDto parameters;
 
-    public BotConfigResponse(String symbol, boolean active, ParametersDto parameters) {
+    public BotConfigResponse(Long id, String symbol, boolean active, Double priceStepPercentage,
+                             Double takeProfitPercentage, Double tradeQuantity, Double lastLongPrice, Double lastShortPrice,
+                             ParametersDto parameters) {
+        this.id = id;
         this.symbol = symbol;
         this.active = active;
+        this.priceStepPercentage = priceStepPercentage;
+        this.takeProfitPercentage = takeProfitPercentage;
+        this.tradeQuantity = tradeQuantity;
+        this.lastLongPrice = lastLongPrice;
+        this.lastShortPrice = lastShortPrice;
         this.parameters = parameters;
     }
 
+    // The C++ worker, the jsonb column and requests.http all speak snake_case,
+    // so this DTO is pinned to snake_case instead of the default bean naming.
+    @JsonProperty("id")
+    public Long getId() { return id; }
+
+    @JsonProperty("symbol")
     public String getSymbol() { return symbol; }
+
+    @JsonProperty("active")
     public boolean isActive() { return active; }
+
+    @JsonProperty("price_step_percentage")
+    public Double getPriceStepPercentage() { return priceStepPercentage; }
+
+    @JsonProperty("take_profit_percentage")
+    public Double getTakeProfitPercentage() { return takeProfitPercentage; }
+
+    @JsonProperty("trade_quantity")
+    public Double getTradeQuantity() { return tradeQuantity; }
+
+    @JsonProperty("last_long_price")
+    public Double getLastLongPrice() { return lastLongPrice; }
+
+    @JsonProperty("last_short_price")
+    public Double getLastShortPrice() { return lastShortPrice; }
+
+    @JsonProperty("parameters")
     public ParametersDto getParameters() { return parameters; }
 
     public static class ParametersDto {
-        private int rsi_period;
-        private double rsi_overbought;
-        private double rsi_oversold;
+        private int rsiPeriod;
+        private double rsiOverbought;
+        private double rsiOversold;
         private String timeframe;
-        //private double stop_loss_pct;
-        //private double take_profit_pct;
-        //private double trade_amount_usdt;
+        private double hammerMultiplier;
+        private double volumeSurgeMultiplier;
+        private String tradingSide;
 
-        public ParametersDto(int rsi_period, double rsi_overbought, double rsi_oversold,
-                             String timeframe){ //double stop_loss_pct, double take_profit_pct, double trade_amount_usdt) {
-            this.rsi_period = rsi_period;
-            this.rsi_overbought = rsi_overbought;
-            this.rsi_oversold = rsi_oversold;
+        public ParametersDto(int rsiPeriod, double rsiOverbought, double rsiOversold, String timeframe,
+                     double hammerMultiplier, double volumeSurgeMultiplier, String tradingSide) {
+            this.rsiPeriod = rsiPeriod;
+            this.rsiOverbought = rsiOverbought;
+            this.rsiOversold = rsiOversold;
             this.timeframe = timeframe;
-            //this.stop_loss_pct = stop_loss_pct;
-            //this.take_profit_pct = take_profit_pct;
-            //this.trade_amount_usdt = trade_amount_usdt;
+            this.hammerMultiplier = hammerMultiplier;
+            this.volumeSurgeMultiplier = volumeSurgeMultiplier;
+            this.tradingSide = tradingSide;
         }
 
-        public int getRsi_period() { return rsi_period; }
-        public double getRsi_overbought() { return rsi_overbought; }
-        public double getRsi_oversold() { return rsi_oversold; }
+        @JsonProperty("rsi_period")
+        public int getRsiPeriod() { return rsiPeriod; }
+
+        @JsonProperty("rsi_overbought")
+        public double getRsiOverbought() { return rsiOverbought; }
+
+        @JsonProperty("rsi_oversold")
+        public double getRsiOversold() { return rsiOversold; }
+
+        @JsonProperty("timeframe")
         public String getTimeframe() { return timeframe; }
-        //public double getStop_loss_pct() { return stop_loss_pct; }
-        //public double getTake_profit_pct() { return take_profit_pct; }
-        //public double getTrade_amount_usdt() { return trade_amount_usdt; }
+
+        @JsonProperty("hammer_multiplier")
+        public double getHammerMultiplier() { return hammerMultiplier; }
+
+        @JsonProperty("volume_surge_multiplier")
+        public double getVolumeSurgeMultiplier() { return volumeSurgeMultiplier; }
+
+        @JsonProperty("trading_side")
+        public String getTradingSide() { return tradingSide; }
     }
 }
