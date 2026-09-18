@@ -3,13 +3,13 @@ package com.example;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 import jakarta.persistence.*;
-import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonSetter;
 import java.util.Map;
 
 @Entity
-@Table(name = "bot_configs", uniqueConstraints = @UniqueConstraint(columnNames = {"user_id", "symbol"}))
-public class BotConfig {
+@Table(name= "bot_configs")
+public class BotConfig{
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -17,54 +17,42 @@ public class BotConfig {
 
     @ManyToOne(fetch = FetchType.LAZY, optional = true)
     @JoinColumn(name = "user_id")
+    @com.fasterxml.jackson.annotation.JsonIgnore
     private AppUser user;
 
-    @Column(nullable = false)
+    @Column(unique = true, nullable = false) //unique allows only one symbol per database
     private String symbol;
+
+    @Column(name = "price_step_percentage")
+    private Double priceStepPercentage;
+
+    @Transient
+    private Double takeProfitPercentageOverride;
+
+    @Transient
+    private Double tradeQuantityOverride;
 
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(columnDefinition = "jsonb")
-    private Map<String, Object> parameters;
-
-    @Column(name = "price_step_percentage")
-    private Double priceStepPercentage; // 3.0 = 3% diff
-
-    @Column(name = "last_long_price")
-    private Double lastLongPrice; // 0 means no active long positions
-
-    @Column(name = "last_short_price")
-    private Double lastShortPrice; // 0 means no open position
-
-    @Column(name = "take_profit_percentage")
-    private Double takeProfitPercentage;
-
-    @Column(name = "trade_quantity")
-    private Double tradeQuantity;
-
-    @Column(name = "long_trade_count")
-    private Integer longTradeCount = 0;
-
-    @Column(name = "short_trade_count")
-    private Integer shortTradeCount = 0;
+    private Map<String, Object> parameters; //easy to scale thanks to the fact that
+                                            //all params like rsi etc. are stored in json
 
     private boolean active;
 
-    public Long getId() {
+    public Long getId(){
         return id;
     }
 
-    @JsonIgnore
+    public void setId(long id){
+        this.id = id;
+    }
+
     public AppUser getUser() {
         return user;
     }
 
-    @JsonIgnore
     public void setUser(AppUser user) {
         this.user = user;
-    }
-
-    public void setId(Long id) {
-        this.id = id;
     }
 
     public String getSymbol() {
@@ -92,99 +80,39 @@ public class BotConfig {
     }
 
     @JsonProperty("price_step_percentage")
-    public Double getPriceStepPercentage() {
-        return priceStepPercentage;
+    public double getPriceStepPercentage() {
+        return priceStepPercentage == null ? 0.0 : priceStepPercentage;
     }
 
-    @JsonProperty("price_step_percentage")
+    @JsonSetter("price_step_percentage")
     public void setPriceStepPercentage(Double priceStepPercentage) {
         this.priceStepPercentage = priceStepPercentage;
     }
 
     @JsonProperty("take_profit_percentage")
-    public Double getTakeProfitPercentage() {
-        if (takeProfitPercentage != null) return takeProfitPercentage;
-        if (parameters != null && parameters.containsKey("take_profit_percentage")) {
-            return ((Number) parameters.get("take_profit_percentage")).doubleValue();
-        }
-        return 0.0;
+    public double getTakeProfitPercentage() {
+        return takeProfitPercentageOverride != null
+                ? takeProfitPercentageOverride
+                : getTakeProfitPct() * 100.0;
     }
 
-    @JsonProperty("take_profit_percentage")
-    public void setTakeProfitPercentage(Double takeProfitPercentage) {
-        this.takeProfitPercentage = takeProfitPercentage;
-    }
-
-    @JsonProperty("trade_quantity")
-    public Double getTradeQuantity() {
-        if (tradeQuantity != null) return tradeQuantity;
-        if (parameters != null && parameters.containsKey("trade_quantity")) {
-            return ((Number) parameters.get("trade_quantity")).doubleValue();
-        }
-        return 0.001;
+    @JsonSetter("take_profit_percentage")
+    public void setTakeProfitPercentage(Double percentage) {
+        takeProfitPercentageOverride = percentage;
+        parameters = parameters == null ? new java.util.HashMap<>() : parameters;
+        parameters.put("take_profit_pct", percentage == null ? 0.0 : percentage / 100.0);
     }
 
     @JsonProperty("trade_quantity")
-    public void setTradeQuantity(Double tradeQuantity) {
-        this.tradeQuantity = tradeQuantity;
+    public double getTradeQuantityForApi() {
+        return tradeQuantityOverride != null ? tradeQuantityOverride : getTradeQuantity();
     }
 
-    public Double getLastLongPrice() {
-        return lastLongPrice;
-    }
-
-    public void setLastLongPrice(Double lastLongPrice) {
-        this.lastLongPrice = lastLongPrice;
-    }
-
-    public Double getLastShortPrice() {
-        return lastShortPrice;
-    }
-
-    public void setLastShortPrice(Double lastShortPrice) {
-        this.lastShortPrice = lastShortPrice;
-    }
-
-    public Integer getLongTradeCount() {
-        return longTradeCount == null ? 0 : longTradeCount;
-    }
-
-    public void setLongTradeCount(Integer longTradeCount) {
-        this.longTradeCount = longTradeCount == null ? 0 : longTradeCount;
-    }
-
-    public Integer getShortTradeCount() {
-        return shortTradeCount == null ? 0 : shortTradeCount;
-    }
-
-    public void setShortTradeCount(Integer shortTradeCount) {
-        this.shortTradeCount = shortTradeCount == null ? 0 : shortTradeCount;
-    }
-
-    public void recordAverageTradePrice(String positionSide, double price) {
-        if ("LONG".equalsIgnoreCase(positionSide)) {
-            int count = getLongTradeCount();
-            double average = lastLongPrice == null ? 0.0 : lastLongPrice;
-            if (average <= 0.0 || count <= 0) {
-                lastLongPrice = price;
-                longTradeCount = 1;
-                return;
-            }
-            lastLongPrice = ((average * count) + price) / (count + 1.0);
-            longTradeCount = count + 1;
-            return;
-        }
-        if ("SHORT".equalsIgnoreCase(positionSide)) {
-            int count = getShortTradeCount();
-            double average = lastShortPrice == null ? 0.0 : lastShortPrice;
-            if (average <= 0.0 || count <= 0) {
-                lastShortPrice = price;
-                shortTradeCount = 1;
-                return;
-            }
-            lastShortPrice = ((average * count) + price) / (count + 1.0);
-            shortTradeCount = count + 1;
-        }
+    @JsonSetter("trade_quantity")
+    public void setTradeQuantityForApi(Double quantity) {
+        tradeQuantityOverride = quantity;
+        parameters = parameters == null ? new java.util.HashMap<>() : parameters;
+        parameters.put("trade_quantity", quantity == null ? 0.001 : quantity);
     }
 
     public int getRsiPeriod() {
@@ -207,18 +135,48 @@ public class BotConfig {
         return (String) parameters.get("timeframe");
     }
 
-    public double getHammerMultiplier() {
-        if (parameters == null || !parameters.containsKey("hammer_multiplier")) return 1.5;
-        return ((Number) parameters.get("hammer_multiplier")).doubleValue();
+    public double getTakeProfitPct() {
+        if (parameters == null || !parameters.containsKey("take_profit_pct")) return 0.05;
+        return ((Number) parameters.get("take_profit_pct")).doubleValue();
     }
 
-    public double getVolumeSurgeMultiplier() {
-        if (parameters == null || !parameters.containsKey("volume_surge_multiplier")) return 1.5;
-        return ((Number) parameters.get("volume_surge_multiplier")).doubleValue();
+    public double getTradeQuantity() {
+        if (parameters == null || !parameters.containsKey("trade_quantity")) return 0.001;
+        return ((Number) parameters.get("trade_quantity")).doubleValue();
     }
 
-    public String getTradingSide() {
-        if (parameters == null || !parameters.containsKey("trading_side")) return "BOTH";
-        return ((String) parameters.get("trading_side")).toUpperCase();
+    public java.util.List<java.util.Map<String, Object>> getRsiIndicators() {
+        if (parameters == null || !(parameters.get("rsi_indicators") instanceof java.util.List<?>)) {
+            return java.util.List.of(java.util.Map.of(
+                    "period", getRsiPeriod(),
+                    "overbought", getRsiOverbought(),
+                    "oversold", getRsiOversold(),
+                    "timeframe", getTimeframe()));
+        }
+        java.util.List<java.util.Map<String, Object>> indicators =
+                (java.util.List<java.util.Map<String, Object>>) (java.util.List<?>) parameters.get("rsi_indicators");
+        return indicators.subList(0, Math.min(3, indicators.size()));
+    }
+
+    public String getHammerTimeframe() {
+        return parameters != null && parameters.containsKey("hammer_timeframe")
+                ? (String) parameters.get("hammer_timeframe")
+                : getTimeframe();
+    }
+
+    public java.util.List<java.util.Map<String, Object>> getHammerIndicators() {
+        return getIndicatorList("hammer_indicators", java.util.Map.of("timeframe", getHammerTimeframe(), "multiplier", 1.5));
+    }
+
+    public java.util.List<java.util.Map<String, Object>> getVolumeIndicators() {
+        return getIndicatorList("volume_indicators", java.util.Map.of("timeframe", getTimeframe(), "multiplier", 1.5));
+    }
+
+    private java.util.List<java.util.Map<String, Object>> getIndicatorList(String key, java.util.Map<String, Object> fallback) {
+        if (parameters == null || !(parameters.get(key) instanceof java.util.List<?> raw)) {
+            return java.util.List.of(fallback);
+        }
+        return ((java.util.List<java.util.Map<String, Object>>) (java.util.List<?>) raw)
+                .subList(0, Math.min(3, raw.size()));
     }
 }

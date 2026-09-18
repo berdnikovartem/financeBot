@@ -18,7 +18,7 @@ import {
   X,
 } from "lucide-react";
 import * as api from "./api";
-import type { BotConfig, BotDraft } from "./api";
+import type { BotConfig, BotDraft, HammerIndicator, RsiIndicator, VolumeIndicator } from "./api";
 
 type View = "overview" | "bots" | "credentials";
 type AuthMode = "login" | "register";
@@ -36,6 +36,9 @@ const emptyDraft: BotDraft = {
     hammer_multiplier: 1.5,
     volume_surge_multiplier: 1.5,
     trading_side: "BOTH",
+    rsi_indicators: [{ period: 14, overbought: 70, oversold: 30, timeframe: "1h" }],
+    hammer_indicators: [{ timeframe: "1h", multiplier: 1.5 }],
+    volume_indicators: [{ timeframe: "1h", multiplier: 1.5 }],
   },
 };
 
@@ -698,6 +701,13 @@ function BotEditor({
   onSave: (symbol: string, draft: BotDraft) => Promise<void>;
   onCancel: () => void;
 }) {
+  const normalizeParameters = (parameters: BotDraft["parameters"]) => ({
+    ...emptyDraft.parameters,
+    ...parameters,
+    rsi_indicators: parameters.rsi_indicators?.slice(0, 3) ?? emptyDraft.parameters.rsi_indicators,
+    hammer_indicators: parameters.hammer_indicators?.slice(0, 3) ?? emptyDraft.parameters.hammer_indicators,
+    volume_indicators: parameters.volume_indicators?.slice(0, 3) ?? emptyDraft.parameters.volume_indicators,
+  });
   const [symbol, setSymbol] = useState(bot?.symbol ?? "");
   const [draft, setDraft] = useState<BotDraft>(
     bot
@@ -706,7 +716,7 @@ function BotEditor({
           price_step_percentage: bot.price_step_percentage ?? 0,
           take_profit_percentage: bot.take_profit_percentage ?? 0,
           trade_quantity: bot.trade_quantity ?? 0.001,
-          parameters: { ...emptyDraft.parameters, ...bot.parameters },
+          parameters: normalizeParameters(bot.parameters),
         }
       : emptyDraft,
   );
@@ -718,7 +728,7 @@ function BotEditor({
           price_step_percentage: bot.price_step_percentage ?? 0,
           take_profit_percentage: bot.take_profit_percentage ?? 0,
           trade_quantity: bot.trade_quantity ?? 0.001,
-          parameters: { ...emptyDraft.parameters, ...bot.parameters },
+          parameters: normalizeParameters(bot.parameters),
         }
       : emptyDraft;
     setSymbol(bot?.symbol ?? "");
@@ -731,6 +741,37 @@ function BotEditor({
     setDraft((current) => ({
       ...current,
       parameters: { ...current.parameters, [key]: value },
+    }));
+  }
+  function updateIndicator<K extends "rsi_indicators" | "hammer_indicators" | "volume_indicators">(
+    key: K,
+    index: number,
+    value: BotDraft["parameters"][K][number],
+  ) {
+    setDraft((current) => ({
+      ...current,
+      parameters: {
+        ...current.parameters,
+        [key]: current.parameters[key].map((item, itemIndex) =>
+          itemIndex === index ? value : item,
+        ),
+      },
+    }));
+  }
+  function addIndicator(key: "rsi_indicators" | "hammer_indicators" | "volume_indicators") {
+    setDraft((current) => {
+      if (current.parameters[key].length >= 3) return current;
+      const value =
+        key === "rsi_indicators"
+          ? { period: 14, overbought: 70, oversold: 30, timeframe: "1h" }
+          : { timeframe: "1h", multiplier: 1.5 };
+      return { ...current, parameters: { ...current.parameters, [key]: [...current.parameters[key], value] } };
+    });
+  }
+  function removeIndicator(key: "rsi_indicators" | "hammer_indicators" | "volume_indicators", index: number) {
+    setDraft((current) => ({
+      ...current,
+      parameters: { ...current.parameters, [key]: current.parameters[key].filter((_, itemIndex) => itemIndex !== index) },
     }));
   }
   async function submit(event: FormEvent) {
@@ -772,20 +813,6 @@ function BotEditor({
         />
       </label>
       <div className="field-grid">
-        <label className="field">
-          Timeframe
-          <select
-            value={draft.parameters.timeframe}
-            onChange={(event) => updateParam("timeframe", event.target.value)}
-            disabled={saving}
-          >
-            <option>1m</option>
-            <option>5m</option>
-            <option>15m</option>
-            <option>1h</option>
-            <option>4h</option>
-          </select>
-        </label>
         <label className="field">
           Trading side
           <select
@@ -856,80 +883,35 @@ function BotEditor({
             disabled={saving}
           />
         </label>
-        <label className="field">
-          RSI period
-          <input
-            type="number"
-            min={2}
-            max={200}
-            value={draft.parameters.rsi_period}
-            onChange={(event) =>
-              updateParam("rsi_period", Number(event.target.value))
-            }
-            disabled={saving}
-          />
-        </label>
       </div>
-      <div className="field-grid">
-        <label className="field">
-          RSI overbought
-          <input
-            type="number"
-            min={20}
-            max={100}
-            step={1}
-            value={draft.parameters.rsi_overbought}
-            onChange={(event) =>
-              updateParam("rsi_overbought", Number(event.target.value))
-            }
-            disabled={saving}
-          />
-        </label>
-        <label className="field">
-          RSI oversold
-          <input
-            type="number"
-            min={0}
-            max={80}
-            step={1}
-            value={draft.parameters.rsi_oversold}
-            onChange={(event) =>
-              updateParam("rsi_oversold", Number(event.target.value))
-            }
-            disabled={saving}
-          />
-        </label>
-      </div>
-      <div className="field-grid">
-        <label className="field">
-          Hammer multiplier
-          <input
-            type="number"
-            min={0.1}
-            max={10}
-            step={0.1}
-            value={draft.parameters.hammer_multiplier}
-            onChange={(event) =>
-              updateParam("hammer_multiplier", Number(event.target.value))
-            }
-            disabled={saving}
-          />
-        </label>
-        <label className="field">
-          Volume surge multiplier
-          <input
-            type="number"
-            min={0.1}
-            max={10}
-            step={0.1}
-            value={draft.parameters.volume_surge_multiplier}
-            onChange={(event) =>
-              updateParam("volume_surge_multiplier", Number(event.target.value))
-            }
-            disabled={saving}
-          />
-        </label>
-      </div>
+      <IndicatorEditor
+        title="RSI indicators"
+        items={draft.parameters.rsi_indicators}
+        onAdd={() => addIndicator("rsi_indicators")}
+        onRemove={(index) => removeIndicator("rsi_indicators", index)}
+        render={(item, index) => (
+          <div className="field-grid" key={`rsi-${index}`}>
+            <label className="field">RSI period<input type="number" min={2} max={200} value={item.period} onChange={(e) => updateIndicator("rsi_indicators", index, { ...item, period: Number(e.target.value) })} /></label>
+            <label className="field">Timeframe<select value={item.timeframe} onChange={(e) => updateIndicator("rsi_indicators", index, { ...item, timeframe: e.target.value })}><TimeframeOptions /></select></label>
+            <label className="field">Overbought<input type="number" min={20} max={100} value={item.overbought} onChange={(e) => updateIndicator("rsi_indicators", index, { ...item, overbought: Number(e.target.value) })} /></label>
+            <label className="field">Oversold<input type="number" min={0} max={80} value={item.oversold} onChange={(e) => updateIndicator("rsi_indicators", index, { ...item, oversold: Number(e.target.value) })} /></label>
+          </div>
+        )}
+      />
+      <IndicatorEditor
+        title="Hammer indicators"
+        items={draft.parameters.hammer_indicators}
+        onAdd={() => addIndicator("hammer_indicators")}
+        onRemove={(index) => removeIndicator("hammer_indicators", index)}
+        render={(item, index) => <div className="field-grid" key={`hammer-${index}`}><label className="field">Timeframe<select value={item.timeframe} onChange={(e) => updateIndicator("hammer_indicators", index, { ...item, timeframe: e.target.value })}><TimeframeOptions /></select></label><label className="field">Multiplier<input type="number" min={0.1} max={10} step={0.1} value={item.multiplier} onChange={(e) => updateIndicator("hammer_indicators", index, { ...item, multiplier: Number(e.target.value) })} /></label></div>}
+      />
+      <IndicatorEditor
+        title="Volume surge indicators"
+        items={draft.parameters.volume_indicators}
+        onAdd={() => addIndicator("volume_indicators")}
+        onRemove={(index) => removeIndicator("volume_indicators", index)}
+        render={(item, index) => <div className="field-grid" key={`volume-${index}`}><label className="field">Timeframe<select value={item.timeframe} onChange={(e) => updateIndicator("volume_indicators", index, { ...item, timeframe: e.target.value })}><TimeframeOptions /></select></label><label className="field">Multiplier<input type="number" min={0.1} max={10} step={0.1} value={item.multiplier} onChange={(e) => updateIndicator("volume_indicators", index, { ...item, multiplier: Number(e.target.value) })} /></label></div>}
+      />
       <div className="toggle-row">
         <div>
           <strong>Run this strategy</strong>
@@ -971,6 +953,36 @@ function BotEditor({
         </button>
       </div>
     </form>
+  );
+}
+
+function TimeframeOptions() {
+  return <><option>1m</option><option>5m</option><option>15m</option><option>1h</option><option>4h</option></>;
+}
+
+function IndicatorEditor<T>({
+  title,
+  items,
+  onAdd,
+  onRemove,
+  render,
+}: {
+  title: string;
+  items: T[];
+  onAdd: () => void;
+  onRemove: (index: number) => void;
+  render: (item: T, index: number) => React.ReactNode;
+}) {
+  return (
+    <section className="indicator-section">
+      <div className="section-heading">
+        <div><span className="eyebrow">SIGNAL INPUT</span><h3>{title}</h3></div>
+        <button type="button" className="secondary-button" onClick={onAdd} disabled={items.length >= 3}><Plus size={15} /> Add ({items.length}/3)</button>
+      </div>
+      {items.map(render)}
+      {!items.length && <small>No indicators configured.</small>}
+      {items.map((_, index) => <button type="button" className="text-button" key={`remove-${index}`} onClick={() => onRemove(index)}>Remove indicator {index + 1}</button>)}
+    </section>
   );
 }
 

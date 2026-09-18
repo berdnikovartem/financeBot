@@ -130,7 +130,7 @@ bool MarketAnalyzer::volumeSurge(double currentVolume, double averageVolume, dou
     return currentVolume >= (averageVolume * surgeMultiplier);
 }
 
-bool MarketAnalyzer::sufficientTimePass(const std::string& symbol, long long candleOpenTimeMs, int thresholdSeconds) {
+bool MarketAnalyzer::sufficientTimePass(long long candleOpenTimeMs, int thresholdSeconds) {
     long long currentTimestampMs = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch()
     ).count();
@@ -138,9 +138,9 @@ bool MarketAnalyzer::sufficientTimePass(const std::string& symbol, long long can
     long long elapsedMs = currentTimestampMs - candleOpenTimeMs;
     long long thresholdMs = thresholdSeconds * 1000LL;
 
-    return elapsedMs >= thresholdMs && lastSignaledCandles[symbol] != candleOpenTimeMs;
-}
-
-void MarketAnalyzer::markCandleSignaled(const std::string& symbol, long long candleOpenTimeMs) {
-    lastSignaledCandles[symbol] = candleOpenTimeMs;
+    if (elapsedMs >= thresholdMs && candleOpenTimeMs != lastSignaledCandleOpen) {
+        lastSignaledCandleOpen = candleOpenTimeMs; // Save it so we don't re-trigger
+        return true;
+    }
+    return false;
 }

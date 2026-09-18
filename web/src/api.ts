@@ -6,7 +6,14 @@ export type ParametersDto = {
   hammer_multiplier: number
   volume_surge_multiplier: number
   trading_side: 'LONG' | 'SHORT' | 'BOTH'
+  rsi_indicators: RsiIndicator[]
+  hammer_indicators: HammerIndicator[]
+  volume_indicators: VolumeIndicator[]
 }
+
+export type RsiIndicator = { period: number; overbought: number; oversold: number; timeframe: string }
+export type HammerIndicator = { timeframe: string; multiplier: number }
+export type VolumeIndicator = { timeframe: string; multiplier: number }
 
 export type BotConfig = {
   id: number

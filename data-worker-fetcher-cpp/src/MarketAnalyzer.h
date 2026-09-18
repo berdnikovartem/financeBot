@@ -1,14 +1,12 @@
 #pragma once
 #include <string>
 #include <vector>
-#include <unordered_map>
 
 class MarketAnalyzer {
 private:
     static size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp);
 
-    // Track the last signaled candle per symbol instead of a single global variable
-    std::unordered_map<std::string, long long> lastSignaledCandles;
+    long long lastSignaledCandleOpen = 0;
 
 public:
     MarketAnalyzer() = default;
@@ -26,8 +24,7 @@ public:
     // Volume surge recognition
     bool volumeSurge(double currentVolume, double averageVolume, double surgeMultiplier = 1.5);
 
-    // Intra-candle time check: requires the symbol now
-    bool sufficientTimePass(const std::string& symbol, long long candleOpenTimeMs, int thresholdSeconds);
-
-    void markCandleSignaled(const std::string& symbol, long long candleOpenTimeMs);
+    // Intra-candle time check: returns true if 'thresholdSeconds' have elapsed since the candle started,
+    // and ensures it only triggers once per unique candle.
+    bool sufficientTimePass(long long candleOpenTimeMs, int thresholdSeconds);
 };

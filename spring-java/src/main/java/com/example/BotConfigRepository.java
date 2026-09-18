@@ -7,8 +7,8 @@ import java.util.List;
 
 @Repository
 public interface BotConfigRepository extends JpaRepository<BotConfig, Long> {
-    Optional<BotConfig> findByUserAndSymbol(AppUser user, String symbol);
-    Optional<BotConfig> findByIdAndUser(Long id, AppUser user);
-    List<BotConfig> findByUserAndActiveTrue(AppUser user);
+    Optional<BotConfig> findBySymbol(String symbol); //If symbol does not exist in database when asked
+                                                     //then empty object is returned back, instead of an exeption
+    List<BotConfig> findByActiveTrue();
     List<BotConfig> findByUserIsNull();
 }
