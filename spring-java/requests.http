@@ -66,10 +66,14 @@ Content-Type: application/json
 {
   "active": true,
   "parameters": {
-    "rsi_period": 14,
-    "rsi_overbought": 70,
-    "rsi_oversold": 30,
-    "timeframe": "1h"
+    "rsi_indicators": [
+      { "period": 7, "overbought": 75, "oversold": 25, "timeframe": "15m" },
+      { "period": 14, "overbought": 70, "oversold": 30, "timeframe": "1h" },
+      { "period": 21, "overbought": 65, "oversold": 35, "timeframe": "4h" }
+    ],
+    "hammer_timeframe": "5m",
+    "take_profit_pct": 0.05,
+    "trade_quantity": 0.001
   }
 }
 

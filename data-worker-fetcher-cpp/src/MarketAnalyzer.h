@@ -15,6 +15,7 @@ public:
 
     //method to get closing prices out of BINANCE exchange
     bool fetchClosingPrices(const std::string& symbol, const std::string& timeframe, int limit, std::vector<double>& closes_out);
+    bool fetchVolumeSurge(const std::string& symbol, const std::string& timeframe, double surge_multiplier);
 
     //method to calculate the RSI
     double calculateWildersRSI(const std::vector<double>& closes, int period);
