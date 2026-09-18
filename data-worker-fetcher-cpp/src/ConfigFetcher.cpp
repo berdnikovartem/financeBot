@@ -1,5 +1,6 @@
 #include "ConfigFetcher.h"
 #include <iostream>
+#include <cstdlib>
 #include <curl/curl.h>
 #include <nlohmann/json.hpp>
 
@@ -56,6 +57,20 @@ void parseIndicatorConfig(const json& params, BotParams& config) {
 
 ConfigFetcher::ConfigFetcher(std::string url) : api_base_url(std::move(url)) {}
 
+namespace {
+curl_slist* addWorkerHeaders(curl_slist* headers) {
+    const char* token = std::getenv("APP_WORKER_SERVICE_TOKEN");
+    const char* email = std::getenv("WORKER_USER_EMAIL");
+    if (!token || std::string(token).empty() || !email || std::string(email).empty()) {
+        return headers;
+    }
+
+    headers = curl_slist_append(headers, (std::string("X-Worker-Token: ") + token).c_str());
+    headers = curl_slist_append(headers, (std::string("X-Worker-User: ") + email).c_str());
+    return headers;
+}
+}
+
 // with the use of libcurl libriary, creating one string that will have all data in it
 size_t ConfigFetcher::WriteCallback(void *contents, size_t size, size_t nmemb, void *userp) {
     ((std::string*)userp)->append((char*)contents, size * nmemb);
@@ -78,15 +93,22 @@ bool ConfigFetcher::fetchConfig(const std::string& symbol, BotParams& config_out
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L); //5L = 5sec
+    curl_slist* headers = addWorkerHeaders(nullptr);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
 
     res = curl_easy_perform(curl);
 
     long http_code = 0;
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+    curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
 
     if (res!=CURLE_OK || http_code != 200) {
-        std::cerr << "ERROR with fetching the config, HTTP code is-> " << http_code << std::endl;
+        std::cerr << "ERROR with fetching the config, HTTP code is-> " << http_code;
+        if (res != CURLE_OK) {
+            std::cerr << ", curl error: " << curl_easy_strerror(res);
+        }
+        std::cerr << " (worker authentication headers may be missing)" << std::endl;
         return false;
     }
 
@@ -123,13 +145,23 @@ bool ConfigFetcher::fetchActiveConfigs(std::vector<BotParams>& configs_out) {
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L);
+    curl_slist* headers = addWorkerHeaders(nullptr);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
 
     res = curl_easy_perform(curl);
     long http_code = 0;
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+    curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
 
-    if (res != CURLE_OK || http_code != 200) return false;
+    if (res != CURLE_OK || http_code != 200) {
+        std::cerr << "ERROR with fetching active configs, HTTP code is-> " << http_code;
+        if (res != CURLE_OK) {
+            std::cerr << ", curl error: " << curl_easy_strerror(res);
+        }
+        std::cerr << " (worker authentication headers may be missing)" << std::endl;
+        return false;
+    }
 
     try {
         json json_array = json::parse(readBuffer);
