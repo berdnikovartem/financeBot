@@ -23,8 +23,8 @@ services:
   cpp-fetcher:
     build: ./data-worker-fetcher-cpp
     container_name: finance_bot_worker
-    env_file:
-      - .env
+    environment:
+      APP_WORKER_SERVICE_TOKEN: ${APP_WORKER_SERVICE_TOKEN:?APP_WORKER_SERVICE_TOKEN must be set}
     depends_on:
       db:
         condition: service_healthy

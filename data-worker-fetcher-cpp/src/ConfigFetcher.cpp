@@ -61,12 +61,14 @@ namespace {
 curl_slist* addWorkerHeaders(curl_slist* headers) {
     const char* token = std::getenv("APP_WORKER_SERVICE_TOKEN");
     const char* email = std::getenv("WORKER_USER_EMAIL");
-    if (!token || std::string(token).empty() || !email || std::string(email).empty()) {
+    if (!token || std::string(token).empty()) {
         return headers;
     }
 
     headers = curl_slist_append(headers, (std::string("X-Worker-Token: ") + token).c_str());
-    headers = curl_slist_append(headers, (std::string("X-Worker-User: ") + email).c_str());
+    if (email && !std::string(email).empty()) {
+        headers = curl_slist_append(headers, (std::string("X-Worker-User: ") + email).c_str());
+    }
     return headers;
 }
 }
@@ -159,7 +161,8 @@ bool ConfigFetcher::fetchActiveConfigs(std::vector<BotParams>& configs_out) {
         if (res != CURLE_OK) {
             std::cerr << ", curl error: " << curl_easy_strerror(res);
         }
-        std::cerr << " (worker authentication headers may be missing)" << std::endl;
+
+                std::cerr << " (worker authentication headers may be missing)" << std::endl;
         return false;
     }
 
@@ -184,6 +187,59 @@ bool ConfigFetcher::fetchActiveConfigs(std::vector<BotParams>& configs_out) {
         }
         return true;
     } catch (...) {
+        return false;
+    }
+}
+
+bool ConfigFetcher::fetchWorkerSessions(std::vector<WorkerSession>& sessions_out) {
+    CURL* curl = curl_easy_init();
+    if (!curl) return false;
+    std::string readBuffer;
+    const std::string endpoint = api_base_url + "/api/v1/worker/sessions";
+    curl_easy_setopt(curl, CURLOPT_URL, endpoint.c_str());
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L);
+    curl_slist* headers = addWorkerHeaders(nullptr);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    const CURLcode res = curl_easy_perform(curl);
+    long http_code = 0;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+    if (res != CURLE_OK || http_code != 200) {
+        std::cerr << "ERROR with fetching worker sessions, HTTP code is-> " << http_code;
+        if (res != CURLE_OK) std::cerr << ", curl error: " << curl_easy_strerror(res);
+        std::cerr << std::endl;
+        return false;
+    }
+    try {
+        const json payload = json::parse(readBuffer);
+        if (!payload.is_array()) return false;
+        sessions_out.clear();
+        for (const auto& session_json : payload) {
+            WorkerSession session;
+            session.email = session_json.value("email", "");
+            session.api_key = session_json.value("apiKey", "");
+            session.api_secret = session_json.value("apiSecret", "");
+            if (session.email.empty() || session.api_key.empty() || session.api_secret.empty()) continue;
+            for (const auto& item : session_json.value("configs", json::array())) {
+                BotParams config;
+                config.symbol = item.value("symbol", "UNKNOWN");
+                config.active = item.value("active", true);
+                if (item.contains("parameters") && item["parameters"].is_object()) {
+                    const auto& params = item["parameters"];
+                    parseIndicatorConfig(params, config);
+                    config.take_profit_pct = params.value("take_profit_pct", 0.05);
+                    config.trade_quantity = params.value("trade_quantity", 0.001);
+                }
+                session.configs.push_back(config);
+            }
+            if (!session.configs.empty()) sessions_out.push_back(std::move(session));
+        }
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "ERROR parsing worker sessions: " << e.what() << std::endl;
         return false;
     }
 }

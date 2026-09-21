@@ -137,28 +137,32 @@ int main() {
 
     ConfigFetcher config_fetcher("http://java-api:8080");
     MarketAnalyzer market_analyzer;
-    BitunixExchange exchange;
-    std::vector<BotParams> active_bots;
+    std::vector<WorkerSession> sessions;
     PositionBook positions;
     TakeProfitBook take_profit_orders;
 
     // Startup retry loop: Wait for Java API & Database readiness
-    while (!config_fetcher.fetchActiveConfigs(active_bots) || active_bots.empty()) {
+    while (!config_fetcher.fetchWorkerSessions(sessions) || sessions.empty()) {
         std::cout << "[INFO] Waiting for active trading pairs from database..." << std::endl;
         std::this_thread::sleep_for(std::chrono::seconds(3));
     }
 
-    std::cout << "[INFO] Initial sync complete. Tracking " << active_bots.size() << " market(s)." << std::endl;
+    std::cout << "[INFO] Initial sync complete. Tracking " << sessions.size() << " user session(s)." << std::endl;
 
     // Main continuous autonomous loop
     while (true) {
         std::cout << "\n----------------------------------------" << std::endl;
         std::cout << "[INFO] Polling database for latest active configurations..." << std::endl;
 
-        if (config_fetcher.fetchActiveConfigs(active_bots)) {
-            std::cout << "[INFO] Active markets count: " << active_bots.size() << std::endl;
+        if (config_fetcher.fetchWorkerSessions(sessions)) {
+            size_t market_count = 0;
+            for (const auto& session : sessions) market_count += session.configs.size();
+            std::cout << "[INFO] Active markets count: " << market_count
+                      << " across " << sessions.size() << " user session(s)" << std::endl;
 
-            for (const auto& bot : active_bots) {
+            for (const auto& session : sessions) {
+                BitunixExchange exchange(session.api_key, session.api_secret);
+                for (const auto& bot : session.configs) {
                 std::cout << "\n[SCAN] Evaluating " << bot.symbol
                           << " | RSI indicators: " << bot.rsi_indicators.size()
                           << " | Hammer timeframe: " << bot.hammer_timeframe << std::endl;
@@ -256,6 +260,7 @@ int main() {
                 } else {
                     std::cerr << "       -> [WARNING] No configured RSI produced a valid value." << std::endl;
                 }
+            }
             }
         } else {
             std::cerr << "[WARNING] Failed to sync active configs from API. Retrying next cycle..." << std::endl;

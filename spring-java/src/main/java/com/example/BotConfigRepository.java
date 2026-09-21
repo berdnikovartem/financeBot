@@ -2,8 +2,8 @@ package com.example;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
-import java.util.Optional;
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface BotConfigRepository extends JpaRepository<BotConfig, Long> {
@@ -11,4 +11,6 @@ public interface BotConfigRepository extends JpaRepository<BotConfig, Long> {
                                                      //then empty object is returned back, instead of an exeption
     List<BotConfig> findByActiveTrue();
     List<BotConfig> findByUserIsNull();
+    Optional<BotConfig> findByUserAndSymbol(AppUser user, String symbol);
+    List<BotConfig> findByActiveTrueAndUserIsNotNull();
 }

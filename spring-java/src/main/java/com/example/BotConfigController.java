@@ -2,6 +2,7 @@ package com.example;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.security.core.Authentication;
 
 import java.util.List;
 import java.util.stream.Collectors;
@@ -11,9 +12,11 @@ import java.util.stream.Collectors;
 public class BotConfigController{
 
     private final BotConfigRepository repo;
+    private final AppUserRepository users;
 
-    public BotConfigController(BotConfigRepository repo){
+    public BotConfigController(BotConfigRepository repo, AppUserRepository users){
         this.repo = repo;
+        this.users = users;
     }
 
     @GetMapping("/config/{symbol}") //getting of current settings of a particular asset
@@ -24,11 +27,21 @@ public class BotConfigController{
     }
 
     @PutMapping("/config/{symbol}")
-    public ResponseEntity<BotConfig> updateConfig(@PathVariable String symbol, @RequestBody BotConfig newConfig){
+    public ResponseEntity<BotConfig> updateConfig(@PathVariable String symbol, @RequestBody BotConfig newConfig,
+                                                  Authentication authentication){
 
-        BotConfig config = repo.findBySymbol(symbol).orElseGet(() -> {
+        AppUser user = authentication.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_USER"))
+                ? users.findByEmail(authentication.getName()).orElseThrow()
+                : null;
+        BotConfig config = user == null ? repo.findBySymbol(symbol)
+                .orElseGet(() -> {
             BotConfig fresh = new BotConfig();
             fresh.setSymbol(symbol);
+            return fresh;
+        }) : repo.findByUserAndSymbol(user, symbol).orElseGet(() -> {
+            BotConfig fresh = new BotConfig();
+            fresh.setSymbol(symbol);
+            fresh.setUser(user);
             return fresh;
         });
 

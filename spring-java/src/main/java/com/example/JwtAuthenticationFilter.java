@@ -29,9 +29,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         String header = request.getHeader("Authorization");
         String internalToken = request.getHeader("X-Worker-Token");
         String workerEmail = request.getHeader("X-Worker-User");
-        if (internalToken != null && internalToken.equals(workerServiceToken) && workerEmail != null && !workerEmail.isBlank()) {
+        if (internalToken != null && internalToken.equals(workerServiceToken)) {
             SecurityContextHolder.getContext().setAuthentication(
-                new UsernamePasswordAuthenticationToken(workerEmail, null, List.of(() -> "ROLE_WORKER")));
+                new UsernamePasswordAuthenticationToken(
+                        workerEmail == null || workerEmail.isBlank() ? "worker-service" : workerEmail,
+                        null, List.of(() -> "ROLE_WORKER")));
             chain.doFilter(request, response);
             return;
         }

@@ -27,6 +27,13 @@ struct BotParams { //basic values
     double trade_quantity = 0.001;
 };
 
+struct WorkerSession {
+    std::string email;
+    std::string api_key;
+    std::string api_secret;
+    std::vector<BotParams> configs;
+};
+
 class ConfigFetcher {
 private:
     std::string api_base_url;
@@ -38,4 +45,5 @@ public:
     bool fetchConfig(const std::string& symbol, BotParams& config_out); //will give back true if http request is succesful
 
     bool fetchActiveConfigs(std::vector<BotParams>& configs_out);
+    bool fetchWorkerSessions(std::vector<WorkerSession>& sessions_out);
 };

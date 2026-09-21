@@ -24,7 +24,9 @@ public class WorkerSessionController {
             return ResponseEntity.notFound().build();
         }
         return ResponseEntity.ok(new WorkerSessionResponse(
+                user.getEmail(),
                 encryption.decrypt(user.getBitunixApiKeyEncrypted()),
-                encryption.decrypt(user.getBitunixApiSecretEncrypted())));
+                encryption.decrypt(user.getBitunixApiSecretEncrypted()),
+                java.util.List.of()));
     }
 }
