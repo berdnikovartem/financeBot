@@ -247,6 +247,12 @@ int main() {
 
                         const bool long_signal = is_oversold && all_volume_surges && all_bullish_hammers;
                         const bool short_signal = is_overbought && all_volume_surges && all_bearish_hammers;
+                        std::cout << "       -> Conditions: long_rsi=" << (is_oversold ? "yes" : "no")
+                                  << ", short_rsi=" << (is_overbought ? "yes" : "no")
+                                  << ", volume=" << (all_volume_surges ? "yes" : "no")
+                                  << ", bullish_hammer=" << (all_bullish_hammers ? "yes" : "no")
+                                  << ", bearish_hammer=" << (all_bearish_hammers ? "yes" : "no")
+                                  << std::endl;
                         if (long_signal) {
                             std::cout << " [SIGNAL - BUY] " << bot.symbol << " All configured indicators are bullish." << std::endl;
                             executeOrderAndNotify(exchange, bot, "BUY", "All configured indicators bullish", signal_rsi, last_close, positions, take_profit_orders);

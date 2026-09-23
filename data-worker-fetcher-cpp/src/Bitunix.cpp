@@ -13,10 +13,7 @@
 using json = nlohmann::json;
 
 BitunixExchange::BitunixExchange(const std::string& key, const std::string& secret) 
-    : apiKey(key), apiSecret(secret) {
-    // Base URL for Bitunix Futures API
-
-}
+    : apiKey(key), apiSecret(secret), baseUrl("https://fapi.bitunix.com") {}
 
 BitunixExchange::BitunixExchange() {
     const char* api_key_env = std::getenv("MY_BITUNIX_API");
@@ -104,12 +101,15 @@ bool BitunixExchange::placeOrder(const std::string& symbol, const std::string& s
         if (res == CURLE_OK) {
             try {
                 auto responseJson = json::parse(readBuffer);
-                // Assuming Bitunix returns {"code": 200} or similar on success
-                if (responseJson.contains("code") && responseJson["code"] == 200) {
+                if (responseJson.contains("code")
+                    && (responseJson["code"] == 0 || responseJson["code"] == 200)) {
                     std::cout << "[Bitunix] Order executed successfully: " << side << " " << positionSide << " " << quantity << " " << symbol << std::endl;
                     return true;
                 } else {
                     std::cerr << "[Bitunix API Error] " << readBuffer << std::endl;
+                    if (res != CURLE_OK) {
+                        std::cerr << "[Bitunix] Order request failed: " << curl_easy_strerror(res) << std::endl;
+                    }
                     return false;
                 }
 
@@ -157,7 +157,8 @@ bool BitunixExchange::placeTakeProfit(const std::string& symbol, const std::stri
 
     try {
         const auto responseJson = json::parse(readBuffer);
-        if (!responseJson.contains("code") || responseJson["code"] != 200 ||
+        if (!responseJson.contains("code")
+            || (responseJson["code"] != 0 && responseJson["code"] != 200) ||
             !responseJson.contains("data") || !responseJson["data"].contains("orderId")) {
             std::cerr << "[Bitunix API Error] Failed to place take-profit: " << readBuffer << std::endl;
             return false;
@@ -198,7 +199,8 @@ bool BitunixExchange::cancelTakeProfit(const std::string& symbol, const std::str
     if (res != CURLE_OK) return false;
     try {
         const auto responseJson = json::parse(readBuffer);
-        if (!responseJson.contains("code") || responseJson["code"] != 200) {
+        if (!responseJson.contains("code")
+            || (responseJson["code"] != 0 && responseJson["code"] != 200)) {
             std::cerr << "[Bitunix API Error] Failed to cancel take-profit: " << readBuffer << std::endl;
             return false;
         }
