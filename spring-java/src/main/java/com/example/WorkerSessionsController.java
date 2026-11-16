@@ -24,11 +24,12 @@ public class WorkerSessionsController {
 
     @GetMapping("/sessions")
     public ResponseEntity<List<WorkerSessionResponse>> sessions() {
-        Map<Long, List<BotConfig>> activeByUser = configs.findByActiveTrueAndUserIsNotNull().stream()
+        List<BotConfig> activeConfigs = configs
+                .findByActiveTrueAndUser_BitunixApiKeyEncryptedIsNotNullAndUser_BitunixApiSecretEncryptedIsNotNull();
+        Map<Long, List<BotConfig>> activeByUser = activeConfigs.stream()
                 .collect(Collectors.groupingBy(config -> config.getUser().getId()));
-        return ResponseEntity.ok(users.findAll().stream()
-                .filter(user -> user.getBitunixApiKeyEncrypted() != null
-                        && user.getBitunixApiSecretEncrypted() != null)
+        List<WorkerSessionResponse> sessions = users
+                .findByBitunixApiKeyEncryptedIsNotNullAndBitunixApiSecretEncryptedIsNotNull().stream()
                 .map(user -> new WorkerSessionResponse(
                         user.getEmail(),
                         encryption.decrypt(user.getBitunixApiKeyEncrypted()),
@@ -45,6 +46,7 @@ public class WorkerSessionsController {
                                                 config.getRsiIndicators(), config.getHammerTimeframe(),
                                                 config.getHammerIndicators(), config.getVolumeIndicators())))
                                 .toList()))
-                .toList());
+                .toList();
+        return ResponseEntity.ok(sessions);
     }
 }

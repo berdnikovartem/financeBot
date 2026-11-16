@@ -73,7 +73,9 @@ state; records and DTOs describe API payloads.
    `GET /api/v1/worker/sessions` for all users with stored credentials.
 4. The worker controller decrypts the saved values and returns a
    `WorkerSessionResponse`. The plural endpoint also adds active bot
-   configurations belonging to each user.
+   configurations belonging to each user. Its repository queries filter out
+   users and configs without both credentials in PostgreSQL, rather than
+   loading every user and filtering in application memory.
 
 The worker endpoints return exchange secrets in their response bodies. They
 must only be reachable by trusted worker clients over a protected connection,
@@ -272,15 +274,22 @@ It does not load that user's `BotConfig` records. The path requires the
 
 Handles `GET /api/v1/worker/sessions`, the plural endpoint for a worker that
 needs to initialize multiple user sessions. It queries active bot
-configurations that have an associated user, groups them by user ID, then
-loads users and filters to those with both exchange credentials present. For
-each remaining user it decrypts the credentials and serializes that user's
-active configs as `BotConfigResponse` objects. Users without active configs
-still appear with an empty config list. This route also requires `WORKER`.
+configurations whose users have both exchange credentials, groups them by user
+ID, then queries only users with both credentials. For each qualifying user it
+decrypts the credentials and serializes that user's active configs as
+`BotConfigResponse` objects. Users without active configs still appear with an
+empty config list. This route also requires `WORKER`.
 
 Unlike the singular endpoint, the plural endpoint is not scoped to the current
 principal: it returns credentials for every qualifying user. The worker
 authorization boundary is therefore especially important.
+
+The endpoint still returns all qualifying sessions in one JSON array. The
+database-side filters avoid loading unrelated users and configs, but do not
+bound response size when many users have credentials. The C++ worker currently
+expects an array, so adding pagination would require a coordinated worker
+client change. For very large numbers of configured accounts, pagination or a
+batch/stream protocol remains a separate scalability improvement.
 
 ### `WorkerSessionResponse`
 
@@ -322,7 +331,12 @@ parameters are absent; for example, RSI period defaults to 14 and timeframe
 defaults to `1h`. Indicator-list getters cap the returned list at three
 entries. API-facing setters for percentage and quantity values store the
 corresponding values in `parameters`; the separate override fields are
-transient and are not persisted.
+transient and are not persisted. It also tracks average long and short entry
+prices, with per-side trade counts persisted separately so averages continue
+correctly after the entity is loaded again. Migration
+`V3__add_bot_config_trade_counts.sql` adds the count columns. The
+`take_profit_percentage` getter accepts the percentage key in existing
+parameter maps as well as the normalized `take_profit_pct` fraction.
 
 ### `BotConfigRepository`
 

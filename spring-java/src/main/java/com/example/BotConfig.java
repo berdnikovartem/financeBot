@@ -26,6 +26,18 @@ public class BotConfig{
     @Column(name = "price_step_percentage")
     private Double priceStepPercentage;
 
+    @Column(name = "last_long_price")
+    private Double lastLongPrice;
+
+    @Column(name = "last_short_price")
+    private Double lastShortPrice;
+
+    @Column(name = "long_trade_count", nullable = false)
+    private Integer longTradeCount = 0;
+
+    @Column(name = "short_trade_count", nullable = false)
+    private Integer shortTradeCount = 0;
+
     @Transient
     private Double takeProfitPercentageOverride;
 
@@ -91,9 +103,11 @@ public class BotConfig{
 
     @JsonProperty("take_profit_percentage")
     public double getTakeProfitPercentage() {
-        return takeProfitPercentageOverride != null
-                ? takeProfitPercentageOverride
-                : getTakeProfitPct() * 100.0;
+        if (takeProfitPercentageOverride != null) return takeProfitPercentageOverride;
+        if (parameters != null && parameters.containsKey("take_profit_percentage")) {
+            return ((Number) parameters.get("take_profit_percentage")).doubleValue();
+        }
+        return getTakeProfitPct() * 100.0;
     }
 
     @JsonSetter("take_profit_percentage")
@@ -113,6 +127,40 @@ public class BotConfig{
         tradeQuantityOverride = quantity;
         parameters = parameters == null ? new java.util.HashMap<>() : parameters;
         parameters.put("trade_quantity", quantity == null ? 0.001 : quantity);
+    }
+
+    public Double getLastLongPrice() {
+        return lastLongPrice;
+    }
+
+    public void setLastLongPrice(Double lastLongPrice) {
+        this.lastLongPrice = lastLongPrice;
+    }
+
+    public Double getLastShortPrice() {
+        return lastShortPrice;
+    }
+
+    public void setLastShortPrice(Double lastShortPrice) {
+        this.lastShortPrice = lastShortPrice;
+    }
+
+    public void recordAverageTradePrice(String positionSide, double price) {
+        if ("LONG".equalsIgnoreCase(positionSide)) {
+            int count = longTradeCount == null ? 0 : longTradeCount;
+            double average = lastLongPrice == null ? 0.0 : lastLongPrice;
+            lastLongPrice = average <= 0.0 || count <= 0
+                    ? price
+                    : ((average * count) + price) / (count + 1.0);
+            longTradeCount = count <= 0 || average <= 0.0 ? 1 : count + 1;
+        } else if ("SHORT".equalsIgnoreCase(positionSide)) {
+            int count = shortTradeCount == null ? 0 : shortTradeCount;
+            double average = lastShortPrice == null ? 0.0 : lastShortPrice;
+            lastShortPrice = average <= 0.0 || count <= 0
+                    ? price
+                    : ((average * count) + price) / (count + 1.0);
+            shortTradeCount = count <= 0 || average <= 0.0 ? 1 : count + 1;
+        }
     }
 
     public int getRsiPeriod() {

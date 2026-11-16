@@ -12,5 +12,5 @@ public interface BotConfigRepository extends JpaRepository<BotConfig, Long> {
     List<BotConfig> findByActiveTrue();
     List<BotConfig> findByUserIsNull();
     Optional<BotConfig> findByUserAndSymbol(AppUser user, String symbol);
-    List<BotConfig> findByActiveTrueAndUserIsNotNull();
+    List<BotConfig> findByActiveTrueAndUser_BitunixApiKeyEncryptedIsNotNullAndUser_BitunixApiSecretEncryptedIsNotNull();
 }

@@ -1,0 +1,5 @@
+ALTER TABLE bot_configs
+    ADD COLUMN IF NOT EXISTS long_trade_count INTEGER NOT NULL DEFAULT 0;
+
+ALTER TABLE bot_configs
+    ADD COLUMN IF NOT EXISTS short_trade_count INTEGER NOT NULL DEFAULT 0;
