@@ -54,9 +54,19 @@ public class BotConfigController{
         return ResponseEntity.ok(repo.save(config));
     }
 
+    @GetMapping("/configs")
+    public ResponseEntity<List<BotConfig>> getUserConfigs(Authentication authentication) {
+        AppUser user = users.findByEmail(authentication.getName()).orElseThrow();
+        return ResponseEntity.ok(repo.findByUser(user));
+    }
+
     @GetMapping("/configs/active")
-    public ResponseEntity<List<BotConfigResponse>> getActiveConfigs() {
-        List<BotConfig> activeConfigs = repo.findByActiveTrue();
+    public ResponseEntity<List<BotConfigResponse>> getActiveConfigs(Authentication authentication) {
+        boolean isUser = authentication.getAuthorities().stream()
+                .anyMatch(authority -> authority.getAuthority().equals("ROLE_USER"));
+        List<BotConfig> activeConfigs = isUser
+                ? repo.findByUserAndActiveTrue(users.findByEmail(authentication.getName()).orElseThrow())
+                : repo.findByActiveTrueAndUserIsNull();
 
         List<BotConfigResponse> responseList = activeConfigs.stream()
                 .map(config -> new BotConfigResponse(

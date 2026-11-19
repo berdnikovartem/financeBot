@@ -5,6 +5,7 @@ import org.hibernate.type.SqlTypes;
 import jakarta.persistence.*;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonSetter;
+import java.time.Instant;
 import java.util.Map;
 
 @Entity
@@ -37,6 +38,9 @@ public class BotConfig{
 
     @Column(name = "short_trade_count", nullable = false)
     private Integer shortTradeCount = 0;
+
+    @Column(name = "updated_at", nullable = false)
+    private Instant updatedAt;
 
     @Transient
     private Double takeProfitPercentageOverride;
@@ -73,6 +77,20 @@ public class BotConfig{
 
     public void setSymbol(String symbol) {
         this.symbol = symbol;
+    }
+
+    public Instant getUpdatedAt() {
+        return updatedAt;
+    }
+
+    @PrePersist
+    protected void onCreate() {
+        updatedAt = Instant.now();
+    }
+
+    @PreUpdate
+    protected void onUpdate() {
+        updatedAt = Instant.now();
     }
 
     public boolean isActive() {

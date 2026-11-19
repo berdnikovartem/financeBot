@@ -49,6 +49,7 @@ public class SecurityConfig {
                     .requestMatchers("/api/v1/auth/worker-token").hasRole("USER")
                     .requestMatchers("/api/v1/me/**").hasRole("USER")
                         .requestMatchers("/api/v1/worker/**").hasRole("WORKER")
+                        .requestMatchers("/api/v1/configs").hasRole("USER")
                         .requestMatchers("/api/v1/config/**", "/api/v1/configs/**", "/api/v1/*/update-last-price").hasAnyRole("USER", "WORKER")
                         .anyRequest().authenticated())
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)

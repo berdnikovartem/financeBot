@@ -18,6 +18,7 @@ export type VolumeIndicator = { timeframe: string; multiplier: number }
 export type BotConfig = {
   id: number
   symbol: string
+  updatedAt: string
   active: boolean
   price_step_percentage: number
   take_profit_percentage: number
@@ -100,8 +101,8 @@ export function logout() {
   return request<void>('/v1/auth/browser/logout', { method: 'POST', body: '{}' })
 }
 
-export function getActiveBots() {
-  return request<BotConfig[]>('/v1/configs/active')
+export function getBots() {
+  return request<BotConfig[]>('/v1/configs')
 }
 
 export function saveBot(symbol: string, draft: BotDraft) {
