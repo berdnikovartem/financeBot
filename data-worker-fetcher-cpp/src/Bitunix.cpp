@@ -116,9 +116,15 @@ bool BitunixExchange::placeOrder(const std::string& symbol, const std::string& s
             {"qty", decimalString(quantity)},
             {"side", side},
             {"tradeSide", tradeSide},
-            {"orderType", "MARKET"}
+            {"orderType", "MARKET"},
+            {"effect", "GTC"},
+            {"reduceOnly", tradeSide == "CLOSE"}
         };
-        if (takeProfitPrice > 0.0) requestBody["tpPrice"] = decimalString(takeProfitPrice);
+        if (takeProfitPrice > 0.0) {
+            requestBody["tpPrice"] = decimalString(takeProfitPrice);
+            requestBody["tpStopType"] = "MARK";
+            requestBody["tpOrderType"] = "MARKET";
+        }
         const std::string body = requestBody.dump();
         const auto now = std::chrono::system_clock::now();
         const auto timestamp = std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(
