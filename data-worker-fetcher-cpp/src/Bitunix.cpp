@@ -1,6 +1,8 @@
 #include "Bitunix.h"
 
 #include "Bitunix.h"
+#include <algorithm>
+#include <cmath>
 #include <iostream>
 #include <chrono>
 #include <iomanip>
@@ -38,9 +40,9 @@ std::string createNonce() {
     return hexEncode(bytes, sizeof(bytes));
 }
 
-std::string decimalString(double value) {
+std::string decimalString(double value, int precision) {
     std::ostringstream result;
-    result << std::fixed << std::setprecision(15) << value;
+    result << std::fixed << std::setprecision(precision) << value;
     std::string formatted = result.str();
     const std::size_t decimalPoint = formatted.find('.');
     if (decimalPoint != std::string::npos) {
@@ -48,6 +50,91 @@ std::string decimalString(double value) {
         if (formatted.back() == '.') formatted.pop_back();
     }
     return formatted;
+}
+
+double jsonNumber(const json& value) {
+    return value.is_string() ? std::stod(value.get<std::string>()) : value.get<double>();
+}
+
+double quantizeTakeProfit(double price, int precision, const std::string& positionSide) {
+    const double scale = std::pow(10.0, precision);
+    const double scaledPrice = price * scale;
+    const double roundedPrice = positionSide == "LONG"
+            ? std::ceil(scaledPrice - 1e-9)
+            : std::floor(scaledPrice + 1e-9);
+    return roundedPrice / scale;
+}
+
+size_t marketRulesWriteCallback(void* contents, size_t size, size_t nmemb, void* userp) {
+    static_cast<std::string*>(userp)->append(static_cast<char*>(contents), size * nmemb);
+    return size * nmemb;
+}
+
+bool fetchSymbolRules(const std::string& symbol, int& basePrecision, int& quotePrecision,
+                      double& minimumQuantity, double& maximumMarketQuantity) {
+    CURL* curl = curl_easy_init();
+    if (!curl) {
+        std::cerr << "[Bitunix] Could not initialize market-rules request" << std::endl;
+        return false;
+    }
+
+    char* escapedSymbol = curl_easy_escape(curl, symbol.c_str(), static_cast<int>(symbol.size()));
+    if (!escapedSymbol) {
+        curl_easy_cleanup(curl);
+        std::cerr << "[Bitunix] Could not encode symbol for market-rules request" << std::endl;
+        return false;
+    }
+    const std::string url = std::string("https://fapi.bitunix.com/api/v1/futures/market/trading_pairs?symbols=") +
+                            escapedSymbol;
+    curl_free(escapedSymbol);
+
+    std::string responseBody;
+    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, marketRulesWriteCallback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseBody);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L);
+    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+    const CURLcode result = curl_easy_perform(curl);
+    long httpStatus = 0;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpStatus);
+    curl_easy_cleanup(curl);
+    if (result != CURLE_OK || httpStatus != 200) {
+        std::cerr << "[Bitunix] Could not fetch market rules for " << symbol << ": "
+                  << (result == CURLE_OK ? "HTTP " + std::to_string(httpStatus) : curl_easy_strerror(result))
+                  << std::endl;
+        return false;
+    }
+
+    try {
+        const auto response = json::parse(responseBody);
+        if (response.value("code", -1) != 0 || !response.contains("data") ||
+            !response["data"].is_array() || response["data"].empty()) {
+            std::cerr << "[Bitunix] Invalid market-rules response for " << symbol << ": "
+                      << responseBody << std::endl;
+            return false;
+        }
+        const auto& rules = response["data"].front();
+        if (rules.value("symbol", std::string()) != symbol ||
+            !rules.contains("basePrecision") || !rules.contains("quotePrecision") ||
+            !rules.contains("minTradeVolume") || !rules.contains("maxMarketOrderVolume")) {
+            std::cerr << "[Bitunix] Market rules are incomplete for " << symbol << std::endl;
+            return false;
+        }
+        basePrecision = rules.at("basePrecision").get<int>();
+        quotePrecision = rules.at("quotePrecision").get<int>();
+        minimumQuantity = jsonNumber(rules.at("minTradeVolume"));
+        maximumMarketQuantity = jsonNumber(rules.at("maxMarketOrderVolume"));
+        if (basePrecision < 0 || basePrecision > 15 || quotePrecision < 0 || quotePrecision > 15 ||
+            minimumQuantity <= 0.0 || maximumMarketQuantity < minimumQuantity) {
+            std::cerr << "[Bitunix] Invalid market rules for " << symbol << std::endl;
+            return false;
+        }
+        return true;
+    } catch (const std::exception& exception) {
+        std::cerr << "[Bitunix] Could not parse market rules for " << symbol << ": "
+                  << exception.what() << std::endl;
+        return false;
+    }
 }
 
 std::string bitunixSignature(const std::string& nonce, const std::string& timestamp,
@@ -111,9 +198,27 @@ bool BitunixExchange::placeOrder(const std::string& symbol, const std::string& s
     }
 
     try {
+        int basePrecision = 0;
+        int quotePrecision = 0;
+        double minimumQuantity = 0.0;
+        double maximumMarketQuantity = 0.0;
+        if (!fetchSymbolRules(symbol, basePrecision, quotePrecision, minimumQuantity, maximumMarketQuantity)) {
+            return false;
+        }
+        const double quantityScale = std::pow(10.0, basePrecision);
+        const double normalizedQuantity = std::round(quantity * quantityScale) / quantityScale;
+        const double quantityTolerance = 1e-9 * std::max(1.0, std::abs(quantity));
+        if (std::abs(quantity - normalizedQuantity) > quantityTolerance ||
+            quantity < minimumQuantity || quantity > maximumMarketQuantity) {
+            std::cerr << "[Bitunix] Refusing " << symbol << " order: quantity " << quantity
+                      << " is outside market rules (min " << minimumQuantity << ", max "
+                      << maximumMarketQuantity << ", precision " << basePrecision << ")" << std::endl;
+            return false;
+        }
+
         json requestBody = {
             {"symbol", symbol},
-            {"qty", decimalString(quantity)},
+            {"qty", decimalString(normalizedQuantity, basePrecision)},
             {"side", side},
             {"tradeSide", tradeSide},
             {"orderType", "MARKET"}
@@ -122,7 +227,8 @@ bool BitunixExchange::placeOrder(const std::string& symbol, const std::string& s
             requestBody["reduceOnly"] = true;
         }
         if (takeProfitPrice > 0.0) {
-            requestBody["tpPrice"] = decimalString(takeProfitPrice);
+            requestBody["tpPrice"] = decimalString(
+                    quantizeTakeProfit(takeProfitPrice, quotePrecision, positionSide), quotePrecision);
             requestBody["tpStopType"] = "MARK_PRICE";
             requestBody["tpOrderType"] = "MARKET";
         }
