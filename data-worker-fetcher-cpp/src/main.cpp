@@ -135,7 +135,18 @@ bool executeOrderAndNotify(BitunixExchange& exchange, const BotParams& bot, cons
 int main() {
     std::cout << "[INFO] Starting Autonomous Database-Driven C++ Crypto Worker..." << std::endl;
 
-    ConfigFetcher config_fetcher("http://java-api:8080");
+    const char* apiBaseUrl = std::getenv("API_BASE_URL");
+    const char* workerToken = std::getenv("APP_WORKER_SERVICE_TOKEN");
+    if (!apiBaseUrl || std::string(apiBaseUrl).empty()) {
+        std::cerr << "[ERROR] API_BASE_URL must be configured." << std::endl;
+        return EXIT_FAILURE;
+    }
+    if (!workerToken || std::string(workerToken).empty()) {
+        std::cerr << "[ERROR] APP_WORKER_SERVICE_TOKEN must be configured." << std::endl;
+        return EXIT_FAILURE;
+    }
+
+    ConfigFetcher config_fetcher(apiBaseUrl);
     MarketAnalyzer market_analyzer;
     std::vector<WorkerSession> sessions;
     PositionBook positions;

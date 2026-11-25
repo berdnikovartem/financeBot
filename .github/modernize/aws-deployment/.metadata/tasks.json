@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Phased plan for moving the Finance Bot containers and database to AWS.",
+  "tasks": [
+    {
+      "type": "setupBaseline",
+      "id": "001-setupBaseline",
+      "description": "Capture the current application behavior and verification baseline before the AWS migration.",
+      "reason": "A baseline provides a comparison point for the application changes and later AWS verification.",
+      "requirements": "Snapshot the repository application sources and record existing build, unit-test, API, database, and worker behavior relevant to deployment. Do not use live exchange accounts or trigger real trades during baseline capture.",
+      "snapshotFolder": ".",
+      "status": "success",
+      "taskSummary": "Captured the source snapshot before application analysis and froze the pre-migration behavior specification at spring-java/src/test/test-cases/test-cases.md with synthetic fixture data. Observed Java package build success; Maven tests: 6 total, 5 passed, 1 errored because PostgreSQL at localhost:5332 was unavailable. Frontend build and C++ build could not run because tsc and cmake are unavailable. API behavior was recorded from source; no database, live external integration, AWS resource, or trade was used."
+    },
+    {
+      "type": "infrastructure",
+      "id": "002-infrastructure",
+      "description": "Define the least-cost AWS infrastructure that can safely host the approved public demo within the $10/month cap.",
+      "reason": "The original ECS Fargate and RDS target does not fit the user's strict budget; the demo needs an affordable, HTTPS-accessible alternative.",
+      "requirements": "Evaluate Terraform infrastructure in us-west-2 for a public AWS-managed CloudFront HTTPS hostname and the least-cost viable AWS compute for the web/API demo. The user selected a strict $10/month cap and demo-only operation; real exchange credentials and live trading must be disabled. Consider a small Lightsail VM with local PostgreSQL only as a candidate, and validate memory capacity, origin protection, public audience reachability, CloudFront plan eligibility, and all recurring charges. Do not select or provision resources until the complete design is shown to meet the cap and the user approves it. No RDS, NAT Gateway, or other independently billed always-on service may be added unless the budget is reapproved.",
+      "status": "blocked",
+      "taskSummary": "Reviewed AWS pricing and the current Compose/container topology. The user most recently confirmed a strict $10/month cap and a demo-only deployment; this supersedes the earlier real-trading requirement. AWS publishes Lightsail plans at $5/month for 0.5 GB and $7/month for 1 GB with IPv4; a 2-GB IPv4 plan is $12/month. CloudFront advertises a flat-rate option starting at $0/month, but the complete HTTPS origin design, plan eligibility, memory fit, and total cost remain unverified. No Terraform or AWS resources were created. Infrastructure remains blocked until a candidate demo topology is demonstrated to fit the budget and is reviewed; no provisioning was authorized.",
+      "dependencies": [],
+      "skills": [],
+      "iacType": "terraform",
+      "provision": true
+    },
+    {
+      "type": "transform",
+      "id": "003-transform-aws-readiness",
+      "description": "Prepare the web, Java API, and C++ worker containers to run reliably in the AWS environment.",
+      "reason": "The current Compose configuration and worker addressing rely on local defaults and service discovery that must be supplied safely in AWS.",
+      "requirements": "Update only the application configuration and container startup needed for the requested AWS deployment. Use production-ready container startup for the Java API, externalize database and cryptographic/service-token secrets, remove development credential defaults from production paths, make the C++ worker's API base URL configurable, preserve the existing API contracts, and keep the worker at one active instance unless duplicate-trade coordination is explicitly designed. Keep the web, Java API, and C++ worker as containers for ECS Fargate. Do not put credentials in source code, container images, or logs.",
+      "status": "success",
+      "taskSummary": "Prepared the Java API, web frontend, and C++ worker for containerized AWS runtime configuration. Java now requires external datasource/JWT/encryption/worker-token settings, uses Flyway with schema validation, disables SQL logging, defaults secure cookies on, and starts from a non-root JRE image. The C++ worker requires API_BASE_URL and APP_WORKER_SERVICE_TOKEN and uses a non-root multi-stage image; the web Nginx upstream is runtime-configurable. Compose uses explicit API/upstream configuration and rejects missing database credentials rather than supplying a weak default. All three local Docker image builds passed; Spring package build passed; 5/5 isolated Java unit tests passed; Compose and rendered Nginx configuration validated. Database-backed integration/context testing was not run. No AWS calls, resource operations, deployment, staging, or commit occurred. ECS desired count remains a task-002 infrastructure setting and should be one for the worker.",
+      "dependencies": [],
+      "successCriteria": {
+        "passBuild": "true",
+        "generateNewUnitTests": "false",
+        "passUnitTests": "true"
+      }
+    },
+    {
+      "type": "transform",
+      "id": "004-transform-demo-safety",
+      "description": "Disable real exchange credentials and live trading in the public budget-capped demo.",
+      "reason": "The user chose a strict $10/month public demo rather than a production trading deployment.",
+      "requirements": "Add an explicit demo-only operating mode that prevents users from saving real exchange API credentials and prevents the trading worker from placing live orders. Ensure demo credentials are not returned by worker session endpoints, and make the worker stopped or inert in the demo deployment. Preserve the regular full-functionality mode for a later separately budgeted production deployment. Add focused tests proving demo mode rejects credential storage and cannot enable live trading.",
+      "dependencies": [
+        "003-transform-aws-readiness"
+      ],
+      "successCriteria": {
+        "passBuild": "true",
+        "generateNewUnitTests": "true",
+        "passUnitTests": "true"
+      }
+    },
+    {
+      "type": "integrationTest",
+      "id": "005-integrationTest",
+      "description": "Build integration tests for migrated AWS services and run post-migration verification.",
+      "reason": "The user selected TestContainers and mocks to verify application behavior without relying on live external trading services.",
+      "requirements": "Use TestContainers for supported local dependencies such as PostgreSQL and mocks for external exchange and Telegram services. Verify the migrated application/database interactions, health checks, and worker configuration-fetch contract. Tests must not use real exchange credentials, place trades, or send real Telegram alerts.",
+      "dependencies": [
+        "001-setupBaseline",
+        "002-infrastructure",
+        "003-transform-aws-readiness",
+        "004-transform-demo-safety"
+      ]
+    },
+    {
+      "type": "security",
+      "id": "006-security-cve-remediation",
+      "description": "Scan dependencies for known CVEs and verify deployment security requirements before public release.",
+      "reason": "The service will be exposed to the internet and handles user accounts and decrypted exchange credentials.",
+      "requirements": "Scan project dependencies for known CVEs and remediate applicable findings to patched versions. Verify demo mode does not accept or expose real exchange credentials, does not enable live trading, and keeps secrets out of source, images, and logs. Verify the approved HTTPS entry and origin restrictions before deployment. Document accepted demo-only limitations and verify the build and unit tests after remediation.",
+      "status": "blocked",
+      "taskSummary": "Completed dependency CVE remediation: the pre-fix OSV scan found 31 affected dependency/advisory matches covering 22 distinct advisories across Log4j, Tomcat, Spring MVC, PostgreSQL, and Jackson; upgraded the Spring Boot parent from 4.1.0 to 4.1.2, then rescanned 117 resolved Maven coordinates with zero OSV matches. A temporary-lock npm audit covered 76 resolved web dependencies and found zero advisories. Added .dockerignore files to all three image build contexts to exclude .env* files; the root .env matches the .gitignore rule and was inspected without printing values. Maven test-compile passed and 5/5 isolated Java unit tests passed. No AWS calls, resource operations, deployment, staging, or commit occurred. Task remains blocked for production-boundary verification: no Terraform/AWS infrastructure exists to verify HTTPS-only public ingress, private database access, or worker ingress, and task 002's cost and HTTPS/TLS decisions remain unresolved. Compose currently publishes local API, web, and database ports; do not treat it as production ingress. Git history/secret tracking and production log contents were not independently audited.",
+      "blockers": [
+        "Production public-ingress, private-database, and worker network boundaries cannot be verified because no infrastructure has been defined or deployed; task 002 remains blocked pending cost and HTTPS/TLS decisions.",
+        "The contents of the local ignored .env were not disclosed or altered, but Git history and production logs were not audited."
+      ],
+      "followUps": [
+        "Once task 002 is unblocked, review the approved infrastructure configuration to verify HTTPS-only public ingress, private database access, and no inbound worker access before task 006.",
+        "Web dependencies are declared as latest and no package lockfile exists; npm audit assessed current registry resolution only, so add and review a lockfile for reproducible future scans."
+      ],
+      "dependencies": [
+        "003-transform-aws-readiness",
+        "004-transform-demo-safety"
+      ],
+      "successCriteria": {
+        "passBuild": "true",
+        "generateNewUnitTests": "false",
+        "passUnitTests": "true"
+      }
+    },
+    {
+      "type": "deployment",
+      "id": "007-deployment-aws-demo",
+      "description": "Deploy the approved non-trading demo to AWS and make it publicly accessible over HTTPS within the $10/month cap.",
+      "reason": "The user wants an internet-accessible AWS demo while maintaining a strict budget and disabling real credential and trading behavior.",
+      "requirements": "Deploy only the reviewed demo services to the approved AWS infrastructure in us-west-2. Use an AWS-managed CloudFront HTTPS hostname if eligibility, origin security, and total recurring cost are verified. Keep live exchange credential entry/storage and trading disabled; do not run the trading worker. Verify the demo behavior, health checks, public origin restrictions, backups appropriate to demo scope, rollback, and cost monitoring. Do not proceed unless the complete design is reviewed and shown to fit the strict $10/month cap.",
+      "dependencies": [
+        "002-infrastructure",
+        "005-integrationTest",
+        "006-security-cve-remediation"
+      ],
+      "skills": [],
+      "targetAzureService": "AWS demo hosting (candidate: Lightsail and CloudFront)",
+      "resourceStatus": "Candidate topology only; provision only after feasibility, cost, and user approval.",
+      "deploymentTool": "terraform"
+    }
+  ],
+  "metadata": {
+    "planName": "AWS Deployment",
+    "projectName": "financeBot",
+    "language": "Java, C++, and TypeScript",
+    "createdAt": "2026-11-15T19:24:00-06:00",
+    "version": "1.0"
+  }
+}

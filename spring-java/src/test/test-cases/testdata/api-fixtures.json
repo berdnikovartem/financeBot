@@ -1,0 +1,19 @@
+{
+  "note": "Synthetic examples only. Do not use real accounts, secrets, or live trading services.",
+  "registration": {
+    "email": "baseline-user@example.test",
+    "password": "synthetic-baseline-password"
+  },
+  "invalidRegistration": {
+    "email": "baseline-user@example.test",
+    "password": "short"
+  },
+  "exchangeCredentials": {
+    "apiKey": "synthetic-api-key",
+    "apiSecret": "synthetic-api-secret"
+  },
+  "botConfig": {
+    "symbol": "BTCUSDT",
+    "active": false
+  }
+}

@@ -10,9 +10,9 @@ services:
     depends_on:
       - db
     environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-artem}
-      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-artem}
-      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-123456}
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:?POSTGRES_DB must be set}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:?POSTGRES_USER must be set}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
       APP_JWT_SECRET: ${APP_JWT_SECRET:?APP_JWT_SECRET must be set}
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?APP_ENCRYPTION_KEY must be set}
       APP_COOKIES_SECURE: ${APP_COOKIES_SECURE:-false}
@@ -24,6 +24,7 @@ services:
     build: ./data-worker-fetcher-cpp
     container_name: finance_bot_worker
     environment:
+      API_BASE_URL: http://java-api:8080
       APP_WORKER_SERVICE_TOKEN: ${APP_WORKER_SERVICE_TOKEN:?APP_WORKER_SERVICE_TOKEN must be set}
     depends_on:
       db:
@@ -35,6 +36,8 @@ services:
     build: ./web
     container_name: finance_bot_web
     restart: unless-stopped
+    environment:
+      API_UPSTREAM: java-api:8080
     ports:
       - "3000:80"
     depends_on:
@@ -47,9 +50,9 @@ services:
     container_name: finance_bot_db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-artem}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-123456}
-      POSTGRES_DB: ${POSTGRES_DB:-artem}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER must be set}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB must be set}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
