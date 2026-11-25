@@ -116,10 +116,11 @@ bool BitunixExchange::placeOrder(const std::string& symbol, const std::string& s
             {"qty", decimalString(quantity)},
             {"side", side},
             {"tradeSide", tradeSide},
-            {"orderType", "MARKET"},
-            {"effect", "GTC"},
-            {"reduceOnly", tradeSide == "CLOSE"}
+            {"orderType", "MARKET"}
         };
+        if (tradeSide == "CLOSE") {
+            requestBody["reduceOnly"] = true;
+        }
         if (takeProfitPrice > 0.0) {
             requestBody["tpPrice"] = decimalString(takeProfitPrice);
             requestBody["tpStopType"] = "MARK";
