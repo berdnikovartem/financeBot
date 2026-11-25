@@ -123,7 +123,7 @@ bool BitunixExchange::placeOrder(const std::string& symbol, const std::string& s
         }
         if (takeProfitPrice > 0.0) {
             requestBody["tpPrice"] = decimalString(takeProfitPrice);
-            requestBody["tpStopType"] = "MARK";
+            requestBody["tpStopType"] = "MARK_PRICE";
             requestBody["tpOrderType"] = "MARKET";
         }
         const std::string body = requestBody.dump();
@@ -181,7 +181,8 @@ bool BitunixExchange::placeOrder(const std::string& symbol, const std::string& s
                       << " (HTTP " << httpStatus << ")" << std::endl;
             return false;
         }
-        std::cerr << "[Bitunix API Error] HTTP " << httpStatus << ": " << responseBody << std::endl;
+        std::cerr << "[Bitunix API Error] HTTP " << httpStatus << ": " << responseBody
+                  << " | Request body: " << body << std::endl;
     } catch (const std::exception& exception) {
         std::cerr << "[Bitunix] Could not create signed order request: " << exception.what() << std::endl;
     }
