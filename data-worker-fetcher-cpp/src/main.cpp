@@ -72,11 +72,10 @@ struct PositionState {
 };
 
 using PositionBook = std::unordered_map<std::string, PositionState>;
-using TakeProfitBook = std::unordered_map<std::string, std::string>;
 
 bool executeOrderAndNotify(BitunixExchange& exchange, const BotParams& bot, const std::string& side,
                            const std::string& signal_type, double rsi, double close_price,
-                           PositionBook& positions, TakeProfitBook& take_profit_orders) {
+                           PositionBook& positions) {
     std::cout << " [TRADE EXECUTION] Initiating " << side << " order for " << bot.symbol
               << " | Price: " << close_price << std::endl;
 
@@ -89,8 +88,16 @@ bool executeOrderAndNotify(BitunixExchange& exchange, const BotParams& bot, cons
         return false;
     }
 
-    // Call placeOrder with all 4 expected parameters
-    bool success = exchange.placeOrder(bot.symbol, order_side, position_side, quantity);
+    const std::string key = bot.symbol + ":" + position_side;
+    auto& position = positions[key];
+    const double new_quantity = position.quantity + quantity;
+    const double average_entry_price =
+            ((position.average_entry_price * position.quantity) + (close_price * quantity)) / new_quantity;
+    const double target_price = position_side == "LONG"
+            ? average_entry_price * (1.0 + bot.take_profit_pct)
+            : average_entry_price * (1.0 - bot.take_profit_pct);
+    const bool success = exchange.placeOrder(bot.symbol, order_side, position_side, "OPEN",
+                                             quantity, target_price);
 
     if (success) {
         std::cout << " [SUCCESS] " << position_side << " position created for " << bot.symbol << std::endl;
@@ -99,30 +106,8 @@ bool executeOrderAndNotify(BitunixExchange& exchange, const BotParams& bot, cons
                             "Trigger: " + signal_type + "\n" +
                             "Entry Price: $" + std::to_string(close_price) + "\n" +
                             "RSI: " + std::to_string(rsi);
-        auto& position = positions[bot.symbol + ":" + position_side];
-        const double new_quantity = position.quantity + quantity;
-        position.average_entry_price =
-                ((position.average_entry_price * position.quantity) + (close_price * quantity)) / new_quantity;
+        position.average_entry_price = average_entry_price;
         position.quantity = new_quantity;
-        const double target_price = position_side == "LONG"
-                ? position.average_entry_price * (1.0 + bot.take_profit_pct)
-                : position.average_entry_price * (1.0 - bot.take_profit_pct);
-        const std::string key = bot.symbol + ":" + position_side;
-        auto existing_order = take_profit_orders.find(key);
-        if (existing_order != take_profit_orders.end()) {
-            if (!exchange.cancelTakeProfit(bot.symbol, existing_order->second)) {
-                std::cerr << " [ERROR] Failed to cancel existing take-profit for " << key << std::endl;
-                return false;
-            }
-        }
-        std::string new_order_id;
-        const std::string tp_side = position_side == "LONG" ? "SELL" : "BUY";
-        if (!exchange.placeTakeProfit(bot.symbol, tp_side, position_side, position.quantity,
-                                      target_price, new_order_id)) {
-            std::cerr << " [ERROR] Failed to place updated take-profit for " << key << std::endl;
-            return false;
-        }
-        take_profit_orders[key] = new_order_id;
         sendTelegramAlert(alert);
         return true;
     } else {
@@ -150,7 +135,6 @@ int main() {
     MarketAnalyzer market_analyzer;
     std::vector<WorkerSession> sessions;
     PositionBook positions;
-    TakeProfitBook take_profit_orders;
 
     // Startup retry loop: Wait for Java API & Database readiness
     while (!config_fetcher.fetchWorkerSessions(sessions) || sessions.empty()) {
@@ -275,10 +259,10 @@ int main() {
                                   << std::endl;
                         if (long_signal) {
                             std::cout << " [SIGNAL - BUY] " << bot.symbol << " All configured indicators are bullish." << std::endl;
-                            executeOrderAndNotify(exchange, bot, "BUY", "All configured indicators bullish", signal_rsi, last_close, positions, take_profit_orders);
+                            executeOrderAndNotify(exchange, bot, "BUY", "All configured indicators bullish", signal_rsi, last_close, positions);
                         } else if (short_signal) {
                             std::cout << " [SIGNAL - SELL] " << bot.symbol << " All configured indicators are bearish." << std::endl;
-                            executeOrderAndNotify(exchange, bot, "SELL", "All configured indicators bearish", signal_rsi, last_close, positions, take_profit_orders);
+                            executeOrderAndNotify(exchange, bot, "SELL", "All configured indicators bearish", signal_rsi, last_close, positions);
                         } else {
                             std::cout << "       -> Not all configured indicators agree. Holding position." << std::endl;
                         }
