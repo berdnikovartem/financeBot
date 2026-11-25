@@ -35,7 +35,6 @@ void parseIndicatorConfig(const json& params, BotParams& config) {
     config.rsi_overbought = config.rsi_indicators.front().overbought;
     config.rsi_oversold = config.rsi_indicators.front().oversold;
     config.timeframe = config.rsi_indicators.front().timeframe;
-    config.hammer_timeframe = params.value("hammer_timeframe", config.timeframe);
     auto parsePatterns = [&params, &config](const char* key, std::vector<PatternConfig>& output) {
         output.clear();
         const bool configured = params.contains(key) && params[key].is_array();
@@ -52,7 +51,9 @@ void parseIndicatorConfig(const json& params, BotParams& config) {
     };
     parsePatterns("hammer_indicators", config.hammer_indicators);
     parsePatterns("volume_indicators", config.volume_indicators);
-    config.hammer_timeframe = config.hammer_indicators.front().timeframe;
+    config.hammer_timeframe = config.hammer_indicators.empty()
+            ? config.timeframe
+            : config.hammer_indicators.front().timeframe;
 }
 }
 
