@@ -69,11 +69,13 @@ void sendTelegramAlert(const std::string& rawMessage) {
 struct PositionState {
     double quantity = 0.0;
     double average_entry_price = 0.0;
+    double last_entry_price = 0.0;
 };
 
 using PositionBook = std::unordered_map<std::string, PositionState>;
 
-bool executeOrderAndNotify(BitunixExchange& exchange, const BotParams& bot, const std::string& side,
+bool executeOrderAndNotify(BitunixExchange& exchange, const std::string& session_email,
+                           const BotParams& bot, const std::string& side,
                            const std::string& signal_type, double rsi, double close_price,
                            PositionBook& positions) {
     std::cout << " [TRADE EXECUTION] Initiating " << side << " order for " << bot.symbol
@@ -83,13 +85,36 @@ bool executeOrderAndNotify(BitunixExchange& exchange, const BotParams& bot, cons
     std::string order_side = side; // "BUY" or "SELL"
     std::string position_side = (side == "BUY") ? "LONG" : "SHORT";
     double quantity = bot.trade_quantity;
+    if (!std::isfinite(bot.price_step_percentage) ||
+        bot.price_step_percentage < 0.0 || bot.price_step_percentage > 100.0) {
+        std::cerr << " [ERROR] Invalid step distance for " << bot.symbol << ": "
+                  << bot.price_step_percentage << "%" << std::endl;
+        return false;
+    }
+    const std::string key = session_email + ":" + bot.symbol + ":" + position_side;
+    auto& position = positions[key];
+    if (bot.price_step_percentage > 0.0 && position.last_entry_price > 0.0) {
+        const double step_fraction = bot.price_step_percentage / 100.0;
+        const double trigger_price = position_side == "LONG"
+                ? position.last_entry_price * (1.0 - step_fraction)
+                : position.last_entry_price * (1.0 + step_fraction);
+        const bool step_reached = position_side == "LONG"
+                ? close_price <= trigger_price
+                : close_price >= trigger_price;
+        if (!step_reached) {
+            std::cout << " [STEP DISTANCE] " << position_side << " add blocked for " << bot.symbol
+                      << " | configured: " << bot.price_step_percentage << "%"
+                      << " | last entry: " << position.last_entry_price
+                      << " | next trigger: " << trigger_price
+                      << " | current: " << close_price << std::endl;
+            return false;
+        }
+    }
     if (quantity <= 0.0 || close_price <= 0.0 || bot.take_profit_pct <= 0.0) {
         std::cerr << " [ERROR] Invalid trade quantity or entry price for " << bot.symbol << std::endl;
         return false;
     }
 
-    const std::string key = bot.symbol + ":" + position_side;
-    auto& position = positions[key];
     const double new_quantity = position.quantity + quantity;
     const double average_entry_price =
             ((position.average_entry_price * position.quantity) + (close_price * quantity)) / new_quantity;
@@ -108,6 +133,7 @@ bool executeOrderAndNotify(BitunixExchange& exchange, const BotParams& bot, cons
                             "RSI: " + std::to_string(rsi);
         position.average_entry_price = average_entry_price;
         position.quantity = new_quantity;
+        position.last_entry_price = close_price;
         sendTelegramAlert(alert);
         return true;
     } else {
@@ -161,7 +187,8 @@ int main() {
                 std::cout << "\n[SCAN] Evaluating " << bot.symbol
                           << " | RSI indicators: " << bot.rsi_indicators.size()
                           << " | Hammer indicators: " << bot.hammer_indicators.size()
-                          << " | Volume indicators: " << bot.volume_indicators.size() << std::endl;
+                          << " | Volume indicators: " << bot.volume_indicators.size()
+                          << " | Step distance: " << bot.price_step_percentage << "%" << std::endl;
 
                 bool is_oversold = !bot.rsi_indicators.empty();
                 bool is_overbought = !bot.rsi_indicators.empty();
@@ -259,10 +286,14 @@ int main() {
                                   << std::endl;
                         if (long_signal) {
                             std::cout << " [SIGNAL - BUY] " << bot.symbol << " All configured indicators are bullish." << std::endl;
-                            executeOrderAndNotify(exchange, bot, "BUY", "All configured indicators bullish", signal_rsi, last_close, positions);
+                            executeOrderAndNotify(exchange, session.email, bot, "BUY",
+                                                  "All configured indicators bullish", signal_rsi,
+                                                  last_close, positions);
                         } else if (short_signal) {
                             std::cout << " [SIGNAL - SELL] " << bot.symbol << " All configured indicators are bearish." << std::endl;
-                            executeOrderAndNotify(exchange, bot, "SELL", "All configured indicators bearish", signal_rsi, last_close, positions);
+                            executeOrderAndNotify(exchange, session.email, bot, "SELL",
+                                                  "All configured indicators bearish", signal_rsi,
+                                                  last_close, positions);
                         } else {
                             std::cout << "       -> Not all configured indicators agree. Holding position." << std::endl;
                         }

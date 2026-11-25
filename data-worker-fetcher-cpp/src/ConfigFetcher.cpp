@@ -121,6 +121,7 @@ bool ConfigFetcher::fetchConfig(const std::string& symbol, BotParams& config_out
 
         config_out.symbol = symbol;
         config_out.active = data.value("active", false);
+        config_out.price_step_percentage = data.value("price_step_percentage", 0.0);
         if (data.contains("parameters") && data["parameters"].is_object()) {
             auto params = data["parameters"];
 
@@ -178,6 +179,7 @@ bool ConfigFetcher::fetchActiveConfigs(std::vector<BotParams>& configs_out) {
             BotParams config;
             config.symbol = item.value("symbol", "UNKNOWN");
             config.active = item.value("active", true);
+            config.price_step_percentage = item.value("price_step_percentage", 0.0);
 
             if (item.contains("parameters") && item["parameters"].is_object()) {
                 auto params = item["parameters"];
@@ -229,6 +231,7 @@ bool ConfigFetcher::fetchWorkerSessions(std::vector<WorkerSession>& sessions_out
                 BotParams config;
                 config.symbol = item.value("symbol", "UNKNOWN");
                 config.active = item.value("active", true);
+                config.price_step_percentage = item.value("price_step_percentage", 0.0);
                 if (item.contains("parameters") && item["parameters"].is_object()) {
                     const auto& params = item["parameters"];
                     parseIndicatorConfig(params, config);

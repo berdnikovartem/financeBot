@@ -18,6 +18,8 @@ struct BotParams { //basic values
     std::vector<PatternConfig> volume_indicators;
     std::string hammer_timeframe = "1h";
 
+    double price_step_percentage = 0.0;
+
     // Legacy single-RSI fields retained for compatibility with existing callers.
     int rsi_period = 14;
     double rsi_overbought = 70.0;
