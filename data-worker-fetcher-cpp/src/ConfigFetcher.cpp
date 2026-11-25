@@ -38,7 +38,8 @@ void parseIndicatorConfig(const json& params, BotParams& config) {
     config.hammer_timeframe = params.value("hammer_timeframe", config.timeframe);
     auto parsePatterns = [&params, &config](const char* key, std::vector<PatternConfig>& output) {
         output.clear();
-        if (params.contains(key) && params[key].is_array()) {
+        const bool configured = params.contains(key) && params[key].is_array();
+        if (configured) {
             for (const auto& item : params[key]) {
                 if (output.size() == 3 || !item.is_object()) break;
                 PatternConfig pattern;
@@ -47,7 +48,7 @@ void parseIndicatorConfig(const json& params, BotParams& config) {
                 if (!pattern.timeframe.empty() && pattern.multiplier > 0.0) output.push_back(pattern);
             }
         }
-        if (output.empty()) output.push_back(PatternConfig{config.timeframe, 1.5});
+        if (!configured) output.push_back(PatternConfig{config.timeframe, 1.5});
     };
     parsePatterns("hammer_indicators", config.hammer_indicators);
     parsePatterns("volume_indicators", config.volume_indicators);

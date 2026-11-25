@@ -176,7 +176,8 @@ int main() {
                 for (const auto& bot : session.configs) {
                 std::cout << "\n[SCAN] Evaluating " << bot.symbol
                           << " | RSI indicators: " << bot.rsi_indicators.size()
-                          << " | Hammer timeframe: " << bot.hammer_timeframe << std::endl;
+                          << " | Hammer indicators: " << bot.hammer_indicators.size()
+                          << " | Volume indicators: " << bot.volume_indicators.size() << std::endl;
 
                 bool is_oversold = !bot.rsi_indicators.empty();
                 bool is_overbought = !bot.rsi_indicators.empty();
@@ -198,7 +199,9 @@ int main() {
                         continue;
                     }
                     std::cout << "       -> RSI (" << indicator.timeframe << ", "
-                              << indicator.period << "): " << rsi << std::endl;
+                              << indicator.period << "): " << rsi
+                              << " | oversold <= " << indicator.oversold
+                              << ", overbought >= " << indicator.overbought << std::endl;
                     if (signal_rsi < 0.0) signal_rsi = rsi;
                     is_oversold = is_oversold && rsi <= indicator.oversold;
                     is_overbought = is_overbought && rsi >= indicator.overbought;
@@ -212,8 +215,8 @@ int main() {
                                 bot.symbol, indicator.timeframe, indicator.multiplier);
                             all_volume_surges = all_volume_surges && volume_surge;
                         }
-                        bool all_bullish_hammers = !bot.hammer_indicators.empty();
-                        bool all_bearish_hammers = !bot.hammer_indicators.empty();
+                        bool all_bullish_hammers = bot.hammer_indicators.empty();
+                        bool all_bearish_hammers = bot.hammer_indicators.empty();
                         for (const auto& hammer : bot.hammer_indicators) {
                         bool bullish_hammer = false;
                         bool bearish_hammer = false;
@@ -258,11 +261,17 @@ int main() {
 
                         const bool long_signal = is_oversold && all_volume_surges && all_bullish_hammers;
                         const bool short_signal = is_overbought && all_volume_surges && all_bearish_hammers;
+                        const char* volume_status = bot.volume_indicators.empty()
+                                ? "disabled" : all_volume_surges ? "yes" : "no";
+                        const char* bullish_hammer_status = bot.hammer_indicators.empty()
+                                ? "disabled" : all_bullish_hammers ? "yes" : "no";
+                        const char* bearish_hammer_status = bot.hammer_indicators.empty()
+                                ? "disabled" : all_bearish_hammers ? "yes" : "no";
                         std::cout << "       -> Conditions: long_rsi=" << (is_oversold ? "yes" : "no")
                                   << ", short_rsi=" << (is_overbought ? "yes" : "no")
-                                  << ", volume=" << (all_volume_surges ? "yes" : "no")
-                                  << ", bullish_hammer=" << (all_bullish_hammers ? "yes" : "no")
-                                  << ", bearish_hammer=" << (all_bearish_hammers ? "yes" : "no")
+                                  << ", volume=" << volume_status
+                                  << ", bullish_hammer=" << bullish_hammer_status
+                                  << ", bearish_hammer=" << bearish_hammer_status
                                   << std::endl;
                         if (long_signal) {
                             std::cout << " [SIGNAL - BUY] " << bot.symbol << " All configured indicators are bullish." << std::endl;
