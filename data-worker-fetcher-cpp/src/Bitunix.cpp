@@ -57,6 +57,14 @@ double jsonNumber(const json& value) {
     return value.is_string() ? std::stod(value.get<std::string>()) : value.get<double>();
 }
 
+std::string jsonStringField(const json& object, const char* key) {
+    if (!object.contains(key) || object[key].is_null()) return {};
+    if (object[key].is_string()) return object[key].get<std::string>();
+    if (object[key].is_number_unsigned()) return std::to_string(object[key].get<unsigned long long>());
+    if (object[key].is_number_integer()) return std::to_string(object[key].get<long long>());
+    return {};
+}
+
 double quantizeTakeProfit(double price, int precision, const std::string& positionSide) {
     const double scale = std::pow(10.0, precision);
     const double scaledPrice = price * scale;
@@ -393,17 +401,47 @@ bool BitunixExchange::getPendingPositions(const std::string& symbol,
     std::vector<BitunixPosition> fetched;
     try {
         for (const auto& item : response["data"]) {
-            if (item.value("symbol", std::string()) != symbol) continue;
+            if (!item.is_object()) {
+                std::cerr << "[Bitunix] Ignoring non-object pending-position row for "
+                          << symbol << std::endl;
+                continue;
+            }
+            const std::string positionSymbol = jsonStringField(item, "symbol");
+            if (!positionSymbol.empty() && positionSymbol != symbol) continue;
+
             BitunixPosition position;
-            position.position_id = item.value("positionId", std::string());
+            position.position_id = jsonStringField(item, "positionId");
             position.symbol = symbol;
-            position.side = item.value("side", std::string());
+            position.side = jsonStringField(item, "side");
+            if (position.side.empty()) position.side = jsonStringField(item, "positionSide");
+            if (!item.contains("qty")) {
+                std::cerr << "[Bitunix] Pending position for " << symbol
+                          << " is missing qty; refusing to scan with unknown exposure." << std::endl;
+                return false;
+            }
             position.quantity = jsonNumber(item.at("qty"));
-            position.average_open_price = jsonNumber(item.at("avgOpenPrice"));
-            if (position.position_id.empty() || position.quantity <= 0.0 ||
-                position.average_open_price <= 0.0 ||
+            if (!std::isfinite(position.quantity)) {
+                std::cerr << "[Bitunix] Pending position for " << symbol
+                          << " has a non-finite qty; refusing to scan." << std::endl;
+                return false;
+            }
+            if (position.quantity <= 0.0) continue;
+
+            const char* averagePriceField = item.contains("avgOpenPrice")
+                    ? "avgOpenPrice" : item.contains("avgPrice") ? "avgPrice" : nullptr;
+            if (!averagePriceField || position.position_id.empty() ||
                 (position.side != "LONG" && position.side != "SHORT")) {
-                std::cerr << "[Bitunix] Ignoring invalid pending position for " << symbol << std::endl;
+                std::cerr << "[Bitunix] Invalid open position for " << symbol
+                          << " (positionId: " << (position.position_id.empty() ? "missing" : "present")
+                          << ", side: " << (position.side.empty() ? "missing" : position.side)
+                          << ", average price: " << (averagePriceField ? "present" : "missing")
+                          << "); refusing to scan with unknown exposure." << std::endl;
+                return false;
+            }
+            position.average_open_price = jsonNumber(item.at(averagePriceField));
+            if (!std::isfinite(position.average_open_price) || position.average_open_price <= 0.0) {
+                std::cerr << "[Bitunix] Open position for " << symbol
+                          << " has an invalid average price; refusing to scan." << std::endl;
                 return false;
             }
             fetched.push_back(std::move(position));

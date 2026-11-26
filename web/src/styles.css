@@ -554,6 +554,10 @@ button, input, select { color-scheme: dark; }
 @media (max-width: 900px) {
   .sidebar { display: none; }
   .main-content { padding: 24px 20px 45px; }
+  .app-shell > .main-content {
+    grid-column: 1;
+    grid-row: 1;
+  }
   .auth-panel { border: 0; }
 }
 
@@ -1355,7 +1359,7 @@ button:not(:disabled):active { transform: scale(.985); }
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 7px 14px;
-  margin: -4px 0 16px;
+  margin: 12px 0 16px;
   padding: 10px 12px;
   border: 1px solid #292c33;
   border-radius: 7px;
@@ -1370,6 +1374,16 @@ button:not(:disabled):active { transform: scale(.985); }
 .order-size-preview small { color: #9298a3; }
 .order-size-preview p { width: 100%; margin: 0; color: #f0a36d; }
 .order-size-preview.below-minimum { border-color: #80563e; }
+.field input,
+.field select {
+  min-height: 48px;
+}
+.field .take-profit-help {
+  color: #9298a3;
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 1.45;
+}
 
 .indicator-config-list { display: grid; gap: 9px; }
 .indicator-config-row {

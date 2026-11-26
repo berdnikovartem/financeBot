@@ -2041,7 +2041,9 @@ function BotEditor({
             <option value="CYCLE">Whole cycle (average entry)</option>
             <option value="TRADE">Each separate trade</option>
           </select>
-          <small>Take-profit exits use limit orders, which may not fill immediately.</small>
+          <small className="take-profit-help">
+            Take-profit exits use limit orders, which may not fill immediately.
+          </small>
         </label>
         <label className="field">
           Order quantity
