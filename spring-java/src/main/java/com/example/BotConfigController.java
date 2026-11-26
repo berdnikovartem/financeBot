@@ -102,6 +102,7 @@ public class BotConfigController{
                                 config.getTakeProfitPct(),
                                 config.getTradeQuantity(),
                                 config.getTakeProfitScope(),
+                                config.getTradingSide(),
                                 config.getRsiIndicators(),
                                 config.getHammerTimeframe(),
                                 config.getHammerIndicators(),

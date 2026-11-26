@@ -27,6 +27,25 @@ class BotConfigControllerTests {
     }
 
     @Test
+    void tradingSideDefaultsToBothAndReturnsConfiguredSide() {
+        BotConfig config = new BotConfig();
+        assertEquals("BOTH", config.getTradingSide());
+
+        config.setParameters(Map.of("trading_side", "LONG"));
+        assertEquals("LONG", config.getTradingSide());
+
+        config.setParameters(Map.of("trading_side", "SHORT"));
+        assertEquals("SHORT", config.getTradingSide());
+    }
+
+    @Test
+    void invalidTradingSideFailsClosed() {
+        BotConfig config = new BotConfig();
+        config.setParameters(Map.of("trading_side", "long"));
+        assertEquals("INVALID", config.getTradingSide());
+    }
+
+    @Test
     void userConfigListIncludesPausedStrategiesOwnedByCurrentUser() {
         BotConfigRepository configs = mock(BotConfigRepository.class);
         AppUserRepository users = mock(AppUserRepository.class);
@@ -66,6 +85,27 @@ class BotConfigControllerTests {
         assertEquals(200, response.getStatusCode().value());
         assertEquals(List.of(), response.getBody());
         verify(configs).findByUserAndActiveTrue(user);
+    }
+
+    @Test
+    void activeConfigResponseIncludesConfiguredTradingSide() {
+        BotConfigRepository configs = mock(BotConfigRepository.class);
+        AppUserRepository users = mock(AppUserRepository.class);
+        AppUser user = new AppUser("user@example.com", "password-hash");
+        BotConfig config = new BotConfig();
+        config.setSymbol("SOLUSDT");
+        config.setParameters(Map.of("trading_side", "LONG"));
+        when(users.findByEmail(user.getEmail())).thenReturn(Optional.of(user));
+        when(configs.findByUserAndActiveTrue(user)).thenReturn(List.of(config));
+
+        BotConfigController controller = new BotConfigController(configs, users);
+        var authentication = new UsernamePasswordAuthenticationToken(
+                user.getEmail(), null, List.of(new SimpleGrantedAuthority("ROLE_USER")));
+
+        var response = controller.getActiveConfigs(authentication);
+
+        assertEquals(200, response.getStatusCode().value());
+        assertEquals("LONG", response.getBody().get(0).getParameters().getTradingSide());
     }
 
     @Test

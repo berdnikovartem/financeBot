@@ -93,6 +93,21 @@ bool executeOrderAndNotify(BitunixExchange& exchange, const std::string& session
                            const BotParams& bot, const std::string& side,
                            const std::string& signal_type, double rsi, double close_price,
                            PositionBook& positions, ConfigFetcher& configFetcher) {
+    if (bot.trading_side != "BOTH" && bot.trading_side != "LONG" && bot.trading_side != "SHORT") {
+        std::cerr << " [ERROR] Invalid trading_side for " << bot.symbol
+                  << "; refusing entry because allowed side is unknown." << std::endl;
+        return false;
+    }
+    if ((side == "BUY" && bot.trading_side == "SHORT") ||
+        (side == "SELL" && bot.trading_side == "LONG")) {
+        std::cout << " [DIRECTION FILTER] " << side << " signal ignored for " << bot.symbol
+                  << "; strategy is configured for " << bot.trading_side << " only." << std::endl;
+        return false;
+    }
+    if (side != "BUY" && side != "SELL") {
+        std::cerr << " [ERROR] Invalid entry direction for " << bot.symbol << std::endl;
+        return false;
+    }
     std::cout << " [TRADE EXECUTION] Initiating " << side << " order for " << bot.symbol
               << " | Price: " << close_price << std::endl;
 
@@ -252,6 +267,7 @@ int main() {
                           << " | RSI indicators: " << bot.rsi_indicators.size()
                           << " | Hammer indicators: " << bot.hammer_indicators.size()
                           << " | Volume indicators: " << bot.volume_indicators.size()
+                          << " | Trading side: " << bot.trading_side
                           << " | Step distance: " << bot.price_step_percentage << "%" << std::endl;
 
                 std::vector<BitunixPosition> open_positions;
@@ -314,6 +330,13 @@ int main() {
                             bot.take_profit_scope == "CYCLE")) {
                     std::cerr << " [TP SYNC] Could not reconcile limit take-profits for "
                               << bot.symbol << "; deferring new signals until the next poll."
+                              << std::endl;
+                    continue;
+                }
+                if (bot.trading_side != "BOTH" && bot.trading_side != "LONG" &&
+                    bot.trading_side != "SHORT") {
+                    std::cerr << " [ERROR] Invalid trading_side for " << bot.symbol
+                              << "; signals disabled until the strategy side is corrected."
                               << std::endl;
                     continue;
                 }
@@ -398,8 +421,10 @@ int main() {
                         // ==========================================
                         // STANDARD RSI FALLBACK TRADE EXECUTION
 
-                        const bool long_signal = is_oversold && all_volume_surges && all_bullish_hammers;
-                        const bool short_signal = is_overbought && all_volume_surges && all_bearish_hammers;
+                        const bool long_signal = (bot.trading_side == "LONG" || bot.trading_side == "BOTH") &&
+                                is_oversold && all_volume_surges && all_bullish_hammers;
+                        const bool short_signal = (bot.trading_side == "SHORT" || bot.trading_side == "BOTH") &&
+                                is_overbought && all_volume_surges && all_bearish_hammers;
                         const char* volume_status = bot.volume_indicators.empty()
                                 ? "disabled" : all_volume_surges ? "yes" : "no";
                         const char* bullish_hammer_status = bot.hammer_indicators.empty()

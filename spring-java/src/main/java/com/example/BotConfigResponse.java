@@ -56,6 +56,7 @@ public class BotConfigResponse {
         private double take_profit_pct;
         private double trade_quantity;
         private String take_profit_scope;
+        private String trading_side;
         private List<Map<String, Object>> rsi_indicators;
         private String hammer_timeframe;
         private List<Map<String, Object>> hammer_indicators;
@@ -63,7 +64,7 @@ public class BotConfigResponse {
 
         public ParametersDto(int rsi_period, double rsi_overbought, double rsi_oversold,
                              String timeframe, double take_profit_pct, double trade_quantity,
-                             String take_profit_scope,
+                             String take_profit_scope, String trading_side,
                              List<Map<String, Object>> rsi_indicators, String hammer_timeframe,
                              List<Map<String, Object>> hammer_indicators,
                              List<Map<String, Object>> volume_indicators) {
@@ -74,6 +75,7 @@ public class BotConfigResponse {
             this.take_profit_pct = take_profit_pct;
             this.trade_quantity = trade_quantity;
             this.take_profit_scope = take_profit_scope;
+            this.trading_side = trading_side;
             this.rsi_indicators = rsi_indicators;
             this.hammer_timeframe = hammer_timeframe;
             this.hammer_indicators = hammer_indicators;
@@ -87,6 +89,8 @@ public class BotConfigResponse {
         public double getTake_profit_pct() { return take_profit_pct; }
         public double getTrade_quantity() { return trade_quantity; }
         public String getTake_profit_scope() { return take_profit_scope; }
+        @JsonProperty("trading_side")
+        public String getTradingSide() { return trading_side; }
         public List<Map<String, Object>> getRsi_indicators() { return rsi_indicators; }
         public String getHammer_timeframe() { return hammer_timeframe; }
         public List<Map<String, Object>> getHammer_indicators() { return hammer_indicators; }

@@ -254,6 +254,16 @@ public class BotConfig{
         return "TRADE".equals(scope) ? "TRADE" : "CYCLE";
     }
 
+    public String getTradingSide() {
+        Object side = parameters == null ? null : parameters.get("trading_side");
+        if (side == null) return "BOTH";
+        if (side instanceof String tradingSide &&
+                ("LONG".equals(tradingSide) || "SHORT".equals(tradingSide) || "BOTH".equals(tradingSide))) {
+            return tradingSide;
+        }
+        return "INVALID";
+    }
+
     public java.util.List<java.util.Map<String, Object>> getRsiIndicators() {
         if (parameters == null || !(parameters.get("rsi_indicators") instanceof java.util.List<?>)) {
             return java.util.List.of(java.util.Map.of(

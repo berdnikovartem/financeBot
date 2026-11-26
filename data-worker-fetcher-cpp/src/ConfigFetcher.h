@@ -27,6 +27,7 @@ struct BotParams { //basic values
     std::string timeframe = "1h";
     double take_profit_pct = 0.05;
     std::string take_profit_scope = "CYCLE";
+    std::string trading_side = "BOTH";
     double trade_quantity = 0.001;
     double last_long_entry_price = 0.0;
     double last_short_entry_price = 0.0;

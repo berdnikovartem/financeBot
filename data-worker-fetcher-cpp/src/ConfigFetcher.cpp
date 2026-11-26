@@ -195,6 +195,7 @@ bool ConfigFetcher::fetchActiveConfigs(std::vector<BotParams>& configs_out) {
                 parseIndicatorConfig(params, config);
                 config.take_profit_pct = params.value("take_profit_pct", 0.05);
                 config.take_profit_scope = params.value("take_profit_scope", std::string("CYCLE"));
+                config.trading_side = params.value("trading_side", std::string("BOTH"));
                 config.trade_quantity = params.value("trade_quantity", 0.001);
             }
             configs_out.push_back(config);
@@ -251,6 +252,7 @@ bool ConfigFetcher::fetchWorkerSessions(std::vector<WorkerSession>& sessions_out
                     parseIndicatorConfig(params, config);
                     config.take_profit_pct = params.value("take_profit_pct", 0.05);
                     config.take_profit_scope = params.value("take_profit_scope", std::string("CYCLE"));
+                    config.trading_side = params.value("trading_side", std::string("BOTH"));
                     config.trade_quantity = params.value("trade_quantity", 0.001);
                 }
                 session.configs.push_back(config);
