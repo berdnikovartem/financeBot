@@ -28,6 +28,10 @@ struct BotParams { //basic values
     double take_profit_pct = 0.05;
     std::string take_profit_scope = "CYCLE";
     double trade_quantity = 0.001;
+    double last_long_entry_price = 0.0;
+    double last_short_entry_price = 0.0;
+    int long_trade_count = 0;
+    int short_trade_count = 0;
 };
 
 struct WorkerSession {
@@ -49,4 +53,7 @@ public:
 
     bool fetchActiveConfigs(std::vector<BotParams>& configs_out);
     bool fetchWorkerSessions(std::vector<WorkerSession>& sessions_out);
+    bool persistCycleState(const std::string& email, const std::string& symbol,
+                           double longLastEntryPrice, int longTradeCount,
+                           double shortLastEntryPrice, int shortTradeCount);
 };

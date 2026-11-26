@@ -554,10 +554,6 @@ button, input, select { color-scheme: dark; }
 @media (max-width: 900px) {
   .sidebar { display: none; }
   .main-content { padding: 24px 20px 45px; }
-  .app-shell > .main-content {
-    grid-column: 1;
-    grid-row: 1;
-  }
   .auth-panel { border: 0; }
 }
 
@@ -797,6 +793,14 @@ button:not(:disabled):active { transform: scale(.985); }
   .ambient-orb { filter: blur(48px); opacity: .25; }
   .ambient-orb.orb-two { opacity: .2; }
   .ambient-orb.orb-three { opacity: .15; }
+  .app-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .app-shell > .main-content {
+    grid-column: 1;
+    grid-row: 1;
+    width: 100%;
+  }
 }
 
 @keyframes ember-drift-one {

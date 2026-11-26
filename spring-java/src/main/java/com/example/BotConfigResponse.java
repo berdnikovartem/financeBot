@@ -1,5 +1,6 @@
 package com.example;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
 import java.util.Map;
 
@@ -9,16 +10,26 @@ public class BotConfigResponse {
     private double price_step_percentage;
     private double take_profit_percentage;
     private double trade_quantity;
+    private double last_long_entry_price;
+    private double last_short_entry_price;
+    private int long_trade_count;
+    private int short_trade_count;
     private ParametersDto parameters;
 
     public BotConfigResponse(String symbol, boolean active, double price_step_percentage,
                              double take_profit_percentage, double trade_quantity,
+                             Double last_long_entry_price, Double last_short_entry_price,
+                             int long_trade_count, int short_trade_count,
                              ParametersDto parameters) {
         this.symbol = symbol;
         this.active = active;
         this.price_step_percentage = price_step_percentage;
         this.take_profit_percentage = take_profit_percentage;
         this.trade_quantity = trade_quantity;
+        this.last_long_entry_price = last_long_entry_price == null ? 0.0 : last_long_entry_price;
+        this.last_short_entry_price = last_short_entry_price == null ? 0.0 : last_short_entry_price;
+        this.long_trade_count = long_trade_count;
+        this.short_trade_count = short_trade_count;
         this.parameters = parameters;
     }
 
@@ -27,6 +38,14 @@ public class BotConfigResponse {
     public double getPrice_step_percentage() { return price_step_percentage; }
     public double getTake_profit_percentage() { return take_profit_percentage; }
     public double getTrade_quantity() { return trade_quantity; }
+    @JsonProperty("last_long_entry_price")
+    public double getLastLongEntryPrice() { return last_long_entry_price; }
+    @JsonProperty("last_short_entry_price")
+    public double getLastShortEntryPrice() { return last_short_entry_price; }
+    @JsonProperty("long_trade_count")
+    public int getLongTradeCount() { return long_trade_count; }
+    @JsonProperty("short_trade_count")
+    public int getShortTradeCount() { return short_trade_count; }
     public ParametersDto getParameters() { return parameters; }
 
     public static class ParametersDto {

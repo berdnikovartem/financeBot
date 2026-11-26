@@ -33,6 +33,12 @@ public class BotConfig{
     @Column(name = "last_short_price")
     private Double lastShortPrice;
 
+    @Column(name = "last_long_entry_price")
+    private Double lastLongEntryPrice;
+
+    @Column(name = "last_short_entry_price")
+    private Double lastShortEntryPrice;
+
     @Column(name = "long_trade_count", nullable = false)
     private Integer longTradeCount = 0;
 
@@ -161,6 +167,38 @@ public class BotConfig{
 
     public void setLastShortPrice(Double lastShortPrice) {
         this.lastShortPrice = lastShortPrice;
+    }
+
+    public Double getLastLongEntryPrice() {
+        return lastLongEntryPrice;
+    }
+
+    public void setLastLongEntryPrice(Double lastLongEntryPrice) {
+        this.lastLongEntryPrice = lastLongEntryPrice;
+    }
+
+    public Double getLastShortEntryPrice() {
+        return lastShortEntryPrice;
+    }
+
+    public void setLastShortEntryPrice(Double lastShortEntryPrice) {
+        this.lastShortEntryPrice = lastShortEntryPrice;
+    }
+
+    public int getLongTradeCount() {
+        return longTradeCount == null ? 0 : longTradeCount;
+    }
+
+    public void setLongTradeCount(Integer longTradeCount) {
+        this.longTradeCount = longTradeCount;
+    }
+
+    public int getShortTradeCount() {
+        return shortTradeCount == null ? 0 : shortTradeCount;
+    }
+
+    public void setShortTradeCount(Integer shortTradeCount) {
+        this.shortTradeCount = shortTradeCount;
     }
 
     public void recordAverageTradePrice(String positionSide, double price) {

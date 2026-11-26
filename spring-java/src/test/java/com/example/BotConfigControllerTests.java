@@ -105,4 +105,49 @@ class BotConfigControllerTests {
         assertEquals(404, response.getStatusCode().value());
         verify(configs, org.mockito.Mockito.never()).delete(org.mockito.ArgumentMatchers.any(BotConfig.class));
     }
+
+    @Test
+    void workerCanPersistCycleProgressForOwnedStrategy() {
+        BotConfigRepository configs = mock(BotConfigRepository.class);
+        AppUserRepository users = mock(AppUserRepository.class);
+        EncryptionService encryption = mock(EncryptionService.class);
+        AppUser user = new AppUser("user@example.com", "password-hash");
+        BotConfig config = new BotConfig();
+        config.setSymbol("SOLUSDT");
+        when(users.findByEmail(user.getEmail())).thenReturn(Optional.of(user));
+        when(configs.findByUserAndSymbol(user, "SOLUSDT")).thenReturn(Optional.of(config));
+        when(configs.save(config)).thenReturn(config);
+
+        WorkerSessionsController controller = new WorkerSessionsController(users, configs, encryption);
+        var authentication = new UsernamePasswordAuthenticationToken(
+                "worker-service", null, List.of(new SimpleGrantedAuthority("ROLE_WORKER")));
+        var request = new WorkerSessionsController.CycleStateUpdate(
+                user.getEmail(), "SOLUSDT", 67.5, 3, 0.0, 0);
+
+        var response = controller.updateCycleState(request, authentication);
+
+        assertEquals(204, response.getStatusCode().value());
+        assertEquals(67.5, config.getLastLongEntryPrice(), 0.00001);
+        assertEquals(3, config.getLongTradeCount());
+        assertEquals(0.0, config.getLastShortEntryPrice(), 0.00001);
+        assertEquals(0, config.getShortTradeCount());
+        verify(configs).save(config);
+    }
+
+    @Test
+    void workerCannotPersistCycleProgressWithInvalidSideState() {
+        BotConfigRepository configs = mock(BotConfigRepository.class);
+        AppUserRepository users = mock(AppUserRepository.class);
+        EncryptionService encryption = mock(EncryptionService.class);
+        WorkerSessionsController controller = new WorkerSessionsController(users, configs, encryption);
+        var authentication = new UsernamePasswordAuthenticationToken(
+                "worker-service", null, List.of(new SimpleGrantedAuthority("ROLE_WORKER")));
+        var request = new WorkerSessionsController.CycleStateUpdate(
+                "user@example.com", "SOLUSDT", 0.0, 1, 0.0, 0);
+
+        var response = controller.updateCycleState(request, authentication);
+
+        assertEquals(400, response.getStatusCode().value());
+        verify(configs, org.mockito.Mockito.never()).save(org.mockito.ArgumentMatchers.any(BotConfig.class));
+    }
 }

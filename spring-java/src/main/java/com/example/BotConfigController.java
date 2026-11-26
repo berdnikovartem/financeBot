@@ -90,6 +90,10 @@ public class BotConfigController{
                         config.getPriceStepPercentage(),
                         config.getTakeProfitPercentage(),
                         config.getTradeQuantityForApi(),
+                        config.getLastLongEntryPrice(),
+                        config.getLastShortEntryPrice(),
+                        config.getLongTradeCount(),
+                        config.getShortTradeCount(),
                         new BotConfigResponse.ParametersDto(
                                 config.getRsiPeriod(),
                                 config.getRsiOverbought(),

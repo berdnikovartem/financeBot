@@ -1,4 +1,5 @@
 #include "ConfigFetcher.h"
+#include <cmath>
 #include <iostream>
 #include <cstdlib>
 #include <curl/curl.h>
@@ -241,6 +242,10 @@ bool ConfigFetcher::fetchWorkerSessions(std::vector<WorkerSession>& sessions_out
                 config.symbol = item.value("symbol", "UNKNOWN");
                 config.active = item.value("active", true);
                 config.price_step_percentage = item.value("price_step_percentage", 0.0);
+                config.last_long_entry_price = item.value("last_long_entry_price", 0.0);
+                config.last_short_entry_price = item.value("last_short_entry_price", 0.0);
+                config.long_trade_count = item.value("long_trade_count", 0);
+                config.short_trade_count = item.value("short_trade_count", 0);
                 if (item.contains("parameters") && item["parameters"].is_object()) {
                     const auto& params = item["parameters"];
                     parseIndicatorConfig(params, config);
@@ -257,4 +262,57 @@ bool ConfigFetcher::fetchWorkerSessions(std::vector<WorkerSession>& sessions_out
         std::cerr << "ERROR parsing worker sessions: " << e.what() << std::endl;
         return false;
     }
+}
+
+bool ConfigFetcher::persistCycleState(const std::string& email, const std::string& symbol,
+                                      double longLastEntryPrice, int longTradeCount,
+                                      double shortLastEntryPrice, int shortTradeCount) {
+    if (email.empty() || symbol.empty() || !std::isfinite(longLastEntryPrice) ||
+        !std::isfinite(shortLastEntryPrice) || longLastEntryPrice < 0.0 ||
+        shortLastEntryPrice < 0.0 || longTradeCount < 0 || shortTradeCount < 0 ||
+        ((longTradeCount == 0) != (longLastEntryPrice == 0.0)) ||
+        ((shortTradeCount == 0) != (shortLastEntryPrice == 0.0))) {
+        std::cerr << "[WORKER STATE] Refusing invalid cycle state for " << symbol << std::endl;
+        return false;
+    }
+
+    CURL* curl = curl_easy_init();
+    if (!curl) {
+        std::cerr << "[WORKER STATE] Could not initialize cycle-state request for "
+                  << symbol << std::endl;
+        return false;
+    }
+
+    const std::string endpoint = api_base_url + "/api/v1/worker/cycle-state";
+    const json body = {
+        {"email", email},
+        {"symbol", symbol},
+        {"longLastEntryPrice", longLastEntryPrice},
+        {"longTradeCount", longTradeCount},
+        {"shortLastEntryPrice", shortLastEntryPrice},
+        {"shortTradeCount", shortTradeCount}
+    };
+    const std::string requestBody = body.dump();
+    curl_slist* headers = addWorkerHeaders(nullptr);
+    headers = curl_slist_append(headers, "Content-Type: application/json");
+    curl_easy_setopt(curl, CURLOPT_URL, endpoint.c_str());
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_POST, 1L);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, requestBody.c_str());
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE_LARGE, static_cast<curl_off_t>(requestBody.size()));
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L);
+
+    const CURLcode result = curl_easy_perform(curl);
+    long httpStatus = 0;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpStatus);
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+    if (result != CURLE_OK || httpStatus < 200 || httpStatus >= 300) {
+        std::cerr << "[WORKER STATE] Failed to persist cycle state for " << symbol
+                  << " (HTTP " << httpStatus;
+        if (result != CURLE_OK) std::cerr << ", " << curl_easy_strerror(result);
+        std::cerr << ")" << std::endl;
+        return false;
+    }
+    return true;
 }

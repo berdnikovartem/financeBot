@@ -72,14 +72,27 @@ struct PositionState {
     double quantity = 0.0;
     double average_entry_price = 0.0;
     double last_entry_price = 0.0;
+    int entry_count = 0;
 };
 
 using PositionBook = std::unordered_map<std::string, PositionState>;
 
+bool persistCycleState(ConfigFetcher& configFetcher, const std::string& email,
+                       const std::string& symbol, const PositionBook& positions) {
+    const auto longPosition = positions.find(email + ":" + symbol + ":LONG");
+    const auto shortPosition = positions.find(email + ":" + symbol + ":SHORT");
+    const PositionState empty;
+    const PositionState& longState = longPosition == positions.end() ? empty : longPosition->second;
+    const PositionState& shortState = shortPosition == positions.end() ? empty : shortPosition->second;
+    return configFetcher.persistCycleState(email, symbol,
+                                           longState.last_entry_price, longState.entry_count,
+                                           shortState.last_entry_price, shortState.entry_count);
+}
+
 bool executeOrderAndNotify(BitunixExchange& exchange, const std::string& session_email,
                            const BotParams& bot, const std::string& side,
                            const std::string& signal_type, double rsi, double close_price,
-                           PositionBook& positions) {
+                           PositionBook& positions, ConfigFetcher& configFetcher) {
     std::cout << " [TRADE EXECUTION] Initiating " << side << " order for " << bot.symbol
               << " | Price: " << close_price << std::endl;
 
@@ -139,6 +152,11 @@ bool executeOrderAndNotify(BitunixExchange& exchange, const std::string& session
         position.average_entry_price = average_entry_price;
         position.quantity = new_quantity;
         position.last_entry_price = close_price;
+        ++position.entry_count;
+        if (!persistCycleState(configFetcher, session_email, bot.symbol, positions)) {
+            std::cerr << " [WORKER STATE] Trade opened but cycle progress was not persisted for "
+                      << bot.symbol << "." << std::endl;
+        }
         if (!take_profit_per_trade) {
             std::vector<BitunixPosition> open_positions;
             if (!exchange.getPendingPositions(bot.symbol, open_positions) ||
@@ -174,6 +192,7 @@ int main() {
     MarketAnalyzer market_analyzer;
     std::vector<WorkerSession> sessions;
     PositionBook positions;
+    std::unordered_set<std::string> restored_position_keys;
 
     // Startup retry loop: Wait for Java API & Database readiness
     while (!config_fetcher.fetchWorkerSessions(sessions) || sessions.empty()) {
@@ -200,6 +219,22 @@ int main() {
                 for (const auto& bot : session.configs) {
                 const std::string strategy_key = session.email + ":" + bot.symbol;
                 active_strategy_keys.insert(strategy_key);
+                const std::string long_key = strategy_key + ":LONG";
+                const std::string short_key = strategy_key + ":SHORT";
+                if (restored_position_keys.insert(long_key).second) {
+                    auto& state = positions[long_key];
+                    if (bot.last_long_entry_price > 0.0 && bot.long_trade_count > 0) {
+                        state.last_entry_price = bot.last_long_entry_price;
+                        state.entry_count = bot.long_trade_count;
+                    }
+                }
+                if (restored_position_keys.insert(short_key).second) {
+                    auto& state = positions[short_key];
+                    if (bot.last_short_entry_price > 0.0 && bot.short_trade_count > 0) {
+                        state.last_entry_price = bot.last_short_entry_price;
+                        state.entry_count = bot.short_trade_count;
+                    }
+                }
                 std::cout << "\n[SCAN] Evaluating " << bot.symbol
                           << " | RSI indicators: " << bot.rsi_indicators.size()
                           << " | Hammer indicators: " << bot.hammer_indicators.size()
@@ -216,6 +251,7 @@ int main() {
 
                 bool has_long_position = false;
                 bool has_short_position = false;
+                bool cycle_state_changed = false;
                 for (const auto& open_position : open_positions) {
                     const std::string position_key = strategy_key + ":" + open_position.side;
                     auto& position = positions[position_key];
@@ -223,6 +259,8 @@ int main() {
                     position.average_entry_price = open_position.average_open_price;
                     if (position.last_entry_price <= 0.0) {
                         position.last_entry_price = open_position.average_open_price;
+                        if (position.entry_count <= 0) position.entry_count = 1;
+                        cycle_state_changed = true;
                     }
                     if (open_position.side == "LONG") has_long_position = true;
                     if (open_position.side == "SHORT") has_short_position = true;
@@ -231,10 +269,23 @@ int main() {
                      std::vector<std::pair<std::string, bool>>{{"LONG", has_long_position},
                                                                {"SHORT", has_short_position}}) {
                     const std::string position_key = strategy_key + ":" + side;
-                    if (!exists && positions.erase(position_key) > 0) {
-                        std::cout << " [POSITION MONITOR] No " << side << " position remains for "
-                                  << bot.symbol << "; resetting that trade cycle." << std::endl;
+                    if (!exists) {
+                        auto position = positions.find(position_key);
+                        if (position != positions.end() &&
+                            (position->second.last_entry_price > 0.0 ||
+                             position->second.entry_count > 0 ||
+                             position->second.quantity > 0.0)) {
+                            position->second = PositionState{};
+                            cycle_state_changed = true;
+                            std::cout << " [POSITION MONITOR] No " << side << " position remains for "
+                                      << bot.symbol << "; resetting that trade cycle." << std::endl;
+                        }
                     }
+                }
+                if (cycle_state_changed &&
+                    !persistCycleState(config_fetcher, session.email, bot.symbol, positions)) {
+                    std::cerr << " [WORKER STATE] Could not sync recovered/reset cycle progress for "
+                              << bot.symbol << "." << std::endl;
                 }
 
                 if (!std::isfinite(bot.take_profit_pct) ||
@@ -352,12 +403,12 @@ int main() {
                             std::cout << " [SIGNAL - BUY] " << bot.symbol << " All configured indicators are bullish." << std::endl;
                             executeOrderAndNotify(exchange, session.email, bot, "BUY",
                                                   "All configured indicators bullish", signal_rsi,
-                                                  last_close, positions);
+                                                  last_close, positions, config_fetcher);
                         } else if (short_signal) {
                             std::cout << " [SIGNAL - SELL] " << bot.symbol << " All configured indicators are bearish." << std::endl;
                             executeOrderAndNotify(exchange, session.email, bot, "SELL",
                                                   "All configured indicators bearish", signal_rsi,
-                                                  last_close, positions);
+                                                  last_close, positions, config_fetcher);
                         } else {
                             std::cout << "       -> Not all configured indicators agree. Holding position." << std::endl;
                         }
@@ -373,7 +424,10 @@ int main() {
                         [&position](const std::string& key) {
                             return position->first.rfind(key + ":", 0) == 0;
                         });
-                if (!strategyStillActive) position = positions.erase(position);
+                if (!strategyStillActive) {
+                    restored_position_keys.erase(position->first);
+                    position = positions.erase(position);
+                }
                 else ++position;
             }
         } else {
