@@ -19,9 +19,6 @@ private:
     // Helper for libcurl
     static size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp);
 
-    // Cryptographic signing for authenticated endpoints
-    std::string generateSignature(const std::string& queryString, const std::string& timestamp);
-
 public:
     BitunixExchange(const std::string& key, const std::string& secret);
 
@@ -31,10 +28,6 @@ public:
     bool placeOrder(const std::string& symbol, const std::string& side, const std::string& positionSide,
                     const std::string& tradeSide, double quantity, double takeProfitPrice,
                     bool attachTradeTakeProfit = false);
-    bool placeTakeProfit(const std::string& symbol, const std::string& side,
-                         const std::string& positionSide, double quantity,
-                         double triggerPrice, std::string& orderId);
-    bool cancelTakeProfit(const std::string& symbol, const std::string& orderId);
     bool getPendingPositions(const std::string& symbol, std::vector<BitunixPosition>& positions);
     bool reconcileCycleTakeProfits(const std::string& symbol,
                                    const std::vector<BitunixPosition>& positions,

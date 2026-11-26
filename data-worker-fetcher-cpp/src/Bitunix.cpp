@@ -65,6 +65,12 @@ std::string jsonStringField(const json& object, const char* key) {
     return {};
 }
 
+std::string normalizePositionSide(const std::string& side) {
+    if (side == "LONG" || side == "BUY") return "LONG";
+    if (side == "SHORT" || side == "SELL") return "SHORT";
+    return {};
+}
+
 double quantizeTakeProfit(double price, int precision, const std::string& positionSide) {
     const double scale = std::pow(10.0, precision);
     const double scaledPrice = price * scale;
@@ -255,25 +261,6 @@ size_t BitunixExchange::WriteCallback(void* contents, size_t size, size_t nmemb,
     return size * nmemb;
 }
 
-// Generates the HMAC-SHA256 signature required by Bitunix
-std::string BitunixExchange::generateSignature(const std::string& queryString, const std::string& timestamp) {
-    std::string dataToSign = queryString + timestamp; // Exchanges usually concatenate these
-    
-    unsigned char hash[EVP_MAX_MD_SIZE];
-    unsigned int hashLen;
-    
-    HMAC(EVP_sha256(), 
-         apiSecret.c_str(), apiSecret.length(),
-         (unsigned char*)dataToSign.c_str(), dataToSign.length(),
-         hash, &hashLen);
-
-    std::stringstream ss;
-    for(unsigned int i = 0; i < hashLen; i++) {
-        ss << std::hex << std::setw(2) << std::setfill('0') << (int)hash[i];
-    }
-    return ss.str();
-}
-
 bool BitunixExchange::placeOrder(const std::string& symbol, const std::string& side,
                                  const std::string& positionSide, const std::string& tradeSide,
                                  double quantity,
@@ -368,7 +355,11 @@ bool BitunixExchange::placeOrder(const std::string& symbol, const std::string& s
                 response.contains("data") && response["data"].is_object() &&
                 response["data"].contains("orderId")) {
                 std::cout << "[Bitunix] Order accepted: " << side << " " << positionSide << " "
-                          << quantity << " " << symbol << std::endl;
+                          << quantity << " " << symbol;
+                if (attachTradeTakeProfit && takeProfitPrice > 0.0) {
+                    std::cout << " with LIMIT take-profit at " << requestBody["tpOrderPrice"];
+                }
+                std::cout << std::endl;
                 return true;
             }
         } catch (const json::exception& exception) {
@@ -412,8 +403,13 @@ bool BitunixExchange::getPendingPositions(const std::string& symbol,
             BitunixPosition position;
             position.position_id = jsonStringField(item, "positionId");
             position.symbol = symbol;
-            position.side = jsonStringField(item, "side");
-            if (position.side.empty()) position.side = jsonStringField(item, "positionSide");
+            const std::string responseSide = jsonStringField(item, "side");
+            const std::string responsePositionSide = jsonStringField(item, "positionSide");
+            position.side = normalizePositionSide(responsePositionSide);
+            if (position.side.empty()) position.side = normalizePositionSide(responseSide);
+            if (position.side.empty()) {
+                position.side = responseSide.empty() ? responsePositionSide : responseSide;
+            }
             if (!item.contains("qty")) {
                 std::cerr << "[Bitunix] Pending position for " << symbol
                           << " is missing qty; refusing to scan with unknown exposure." << std::endl;
@@ -618,96 +614,6 @@ bool BitunixExchange::reconcileCycleTakeProfits(const std::string& symbol,
         }
     }
     return success;
-}
-
-bool BitunixExchange::placeTakeProfit(const std::string& symbol, const std::string& side,
-                                      const std::string& positionSide, double quantity,
-                                      double triggerPrice, std::string& orderId) {
-    auto now = std::chrono::system_clock::now();
-    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
-    std::string timestamp = std::to_string(ms);
-    std::ostringstream params;
-    params << "symbol=" << symbol << "&side=" << side << "&positionSide=" << positionSide
-           << "&tradeSide=CLOSE&type=MARKET&qty=" << std::setprecision(15) << quantity
-           << "&triggerPrice=" << triggerPrice
-           << "&triggerDirection=" << (side == "SELL" ? "1" : "2") << "&executePrice=0";
-    const std::string queryString = params.str();
-    const std::string url = baseUrl + "/api/v1/futures/plan/place_order?" + queryString +
-                            "&signature=" + generateSignature(queryString, timestamp);
-
-    CURL* curl = curl_easy_init();
-    if (!curl) return false;
-    std::string readBuffer;
-    struct curl_slist* headers = nullptr;
-    headers = curl_slist_append(headers, ("X-API-KEY: " + apiKey).c_str());
-    headers = curl_slist_append(headers, ("X-TIMESTAMP: " + timestamp).c_str());
-    headers = curl_slist_append(headers, "Content-Type: application/json");
-    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-    curl_easy_setopt(curl, CURLOPT_POST, 1L);
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, "");
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
-    const CURLcode res = curl_easy_perform(curl);
-    curl_slist_free_all(headers);
-    curl_easy_cleanup(curl);
-    if (res != CURLE_OK) return false;
-
-    try {
-        const auto responseJson = json::parse(readBuffer);
-        if (!responseJson.contains("code")
-            || (responseJson["code"] != 0 && responseJson["code"] != 200) ||
-            !responseJson.contains("data") || !responseJson["data"].contains("orderId")) {
-            std::cerr << "[Bitunix API Error] Failed to place take-profit: " << readBuffer << std::endl;
-            return false;
-        }
-        const auto& responseOrderId = responseJson["data"]["orderId"];
-        orderId = responseOrderId.is_string() ? responseOrderId.get<std::string>() : responseOrderId.dump();
-        return !orderId.empty();
-    } catch (const std::exception& e) {
-        std::cerr << "[Bitunix] Failed to parse take-profit response: " << e.what()
-                  << "\nRaw: " << readBuffer << std::endl;
-        return false;
-    }
-}
-
-bool BitunixExchange::cancelTakeProfit(const std::string& symbol, const std::string& orderId) {
-    auto now = std::chrono::system_clock::now();
-    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
-    std::string timestamp = std::to_string(ms);
-    const std::string queryString = "symbol=" + symbol + "&orderId=" + orderId;
-    const std::string url = baseUrl + "/api/v1/futures/plan/cancel_orders?" + queryString +
-                            "&signature=" + generateSignature(queryString, timestamp);
-    CURL* curl = curl_easy_init();
-    if (!curl) return false;
-    std::string readBuffer;
-    struct curl_slist* headers = nullptr;
-    headers = curl_slist_append(headers, ("X-API-KEY: " + apiKey).c_str());
-    headers = curl_slist_append(headers, ("X-TIMESTAMP: " + timestamp).c_str());
-    headers = curl_slist_append(headers, "Content-Type: application/json");
-    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-    curl_easy_setopt(curl, CURLOPT_POST, 1L);
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, "");
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
-    const CURLcode res = curl_easy_perform(curl);
-    curl_slist_free_all(headers);
-    curl_easy_cleanup(curl);
-    if (res != CURLE_OK) return false;
-    try {
-        const auto responseJson = json::parse(readBuffer);
-        if (!responseJson.contains("code")
-            || (responseJson["code"] != 0 && responseJson["code"] != 200)) {
-            std::cerr << "[Bitunix API Error] Failed to cancel take-profit: " << readBuffer << std::endl;
-            return false;
-        }
-        return true;
-    } catch (const std::exception& e) {
-        std::cerr << "[Bitunix] Failed to parse cancel response: " << e.what()
-                  << "\nRaw: " << readBuffer << std::endl;
-        return false;
-    }
 }
 
 bool BitunixExchange::openLong(const std::string& symbol, double quantity) {
