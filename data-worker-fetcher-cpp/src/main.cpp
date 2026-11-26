@@ -138,9 +138,7 @@ bool executeOrderAndNotify(BitunixExchange& exchange, const std::string& session
     const double target_price = position_side == "LONG"
             ? take_profit_basis * (1.0 + bot.take_profit_pct)
             : take_profit_basis * (1.0 - bot.take_profit_pct);
-    const bool success = exchange.placeOrder(bot.symbol, order_side, position_side, "OPEN",
-                                             quantity, take_profit_per_trade ? target_price : 0.0,
-                                             take_profit_per_trade);
+    const bool success = exchange.placeOrder(bot.symbol, order_side, position_side, "OPEN", quantity);
 
     if (success) {
         std::cout << " [SUCCESS] " << position_side << " position created for " << bot.symbol << std::endl;
@@ -157,7 +155,22 @@ bool executeOrderAndNotify(BitunixExchange& exchange, const std::string& session
             std::cerr << " [WORKER STATE] Trade opened but cycle progress was not persisted for "
                       << bot.symbol << "." << std::endl;
         }
-        if (!take_profit_per_trade) {
+        if (take_profit_per_trade) {
+            std::vector<BitunixPosition> open_positions;
+            const auto openPositionFound = exchange.getPendingPositions(bot.symbol, open_positions)
+                    ? std::find_if(open_positions.begin(), open_positions.end(),
+                                   [&position_side](const BitunixPosition& openPosition) {
+                                       return openPosition.side == position_side;
+                                   })
+                    : open_positions.end();
+            if (openPositionFound == open_positions.end() ||
+                !exchange.placeTradeTakeProfitLimit(bot.symbol, *openPositionFound, quantity,
+                                                    target_price, position.entry_count)) {
+                std::cerr << " [TP ERROR] Entry opened but standalone LIMIT take-profit could not be "
+                          << "confirmed for " << bot.symbol << " " << position_side << "." << std::endl;
+                alert += "\nWARNING: standalone LIMIT take-profit placement was not confirmed.";
+            }
+        } else {
             std::vector<BitunixPosition> open_positions;
             if (!exchange.getPendingPositions(bot.symbol, open_positions) ||
                 !exchange.reconcileCycleTakeProfits(bot.symbol, open_positions, bot.take_profit_pct)) {

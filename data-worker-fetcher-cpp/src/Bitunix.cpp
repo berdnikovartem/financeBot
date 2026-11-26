@@ -263,11 +263,10 @@ size_t BitunixExchange::WriteCallback(void* contents, size_t size, size_t nmemb,
 
 bool BitunixExchange::placeOrder(const std::string& symbol, const std::string& side,
                                  const std::string& positionSide, const std::string& tradeSide,
-                                 double quantity,
-                                 double takeProfitPrice, bool attachTradeTakeProfit) {
-    if (apiKey.empty() || apiSecret.empty() || quantity <= 0.0 || takeProfitPrice < 0.0 ||
+                                 double quantity) {
+    if (apiKey.empty() || apiSecret.empty() || quantity <= 0.0 ||
         (tradeSide != "OPEN" && tradeSide != "CLOSE")) {
-        std::cerr << "[Bitunix] Refusing order with missing credentials or invalid quantity/TP price" << std::endl;
+        std::cerr << "[Bitunix] Refusing order with missing credentials or invalid quantity" << std::endl;
         return false;
     }
 
@@ -299,14 +298,6 @@ bool BitunixExchange::placeOrder(const std::string& symbol, const std::string& s
         };
         if (tradeSide == "CLOSE") {
             requestBody["reduceOnly"] = true;
-        }
-        if (attachTradeTakeProfit && takeProfitPrice > 0.0) {
-            const std::string targetPrice = decimalString(
-                    quantizeTakeProfit(takeProfitPrice, quotePrecision, positionSide), quotePrecision);
-            requestBody["tpPrice"] = targetPrice;
-            requestBody["tpStopType"] = "MARK_PRICE";
-            requestBody["tpOrderType"] = "LIMIT";
-            requestBody["tpOrderPrice"] = targetPrice;
         }
         const std::string body = requestBody.dump();
         const auto now = std::chrono::system_clock::now();
@@ -355,11 +346,7 @@ bool BitunixExchange::placeOrder(const std::string& symbol, const std::string& s
                 response.contains("data") && response["data"].is_object() &&
                 response["data"].contains("orderId")) {
                 std::cout << "[Bitunix] Order accepted: " << side << " " << positionSide << " "
-                          << quantity << " " << symbol;
-                if (attachTradeTakeProfit && takeProfitPrice > 0.0) {
-                    std::cout << " with LIMIT take-profit at " << requestBody["tpOrderPrice"];
-                }
-                std::cout << std::endl;
+                          << quantity << " " << symbol << std::endl;
                 return true;
             }
         } catch (const json::exception& exception) {
@@ -373,6 +360,72 @@ bool BitunixExchange::placeOrder(const std::string& symbol, const std::string& s
         std::cerr << "[Bitunix] Could not create signed order request: " << exception.what() << std::endl;
     }
     return false;
+}
+
+bool BitunixExchange::placeTradeTakeProfitLimit(const std::string& symbol,
+                                                const BitunixPosition& position,
+                                                double quantity, double targetPrice,
+                                                int entrySequence) {
+    if (apiKey.empty() || apiSecret.empty() || position.position_id.empty() ||
+        (position.side != "LONG" && position.side != "SHORT") ||
+        !std::isfinite(quantity) || quantity <= 0.0 ||
+        !std::isfinite(targetPrice) || targetPrice <= 0.0 || entrySequence <= 0) {
+        std::cerr << "[Bitunix] Refusing invalid standalone trade TP LIMIT for "
+                  << symbol << std::endl;
+        return false;
+    }
+
+    int basePrecision = 0;
+    int quotePrecision = 0;
+    double minimumQuantity = 0.0;
+    double maximumMarketQuantity = 0.0;
+    if (!fetchSymbolRules(symbol, basePrecision, quotePrecision, minimumQuantity, maximumMarketQuantity)) {
+        return false;
+    }
+    const double quantityScale = std::pow(10.0, basePrecision);
+    const double normalizedQuantity = std::round(quantity * quantityScale) / quantityScale;
+    if (quantity < minimumQuantity || quantity > maximumMarketQuantity ||
+        std::abs(quantity - normalizedQuantity) > 1e-9 * std::max(1.0, std::abs(quantity))) {
+        std::cerr << "[Bitunix] Refusing trade TP LIMIT for " << symbol
+                  << ": quantity " << quantity << " violates symbol rules." << std::endl;
+        return false;
+    }
+
+    const std::string closeSide = position.side == "LONG" ? "SELL" : "BUY";
+    const std::string limitPrice = decimalString(
+            quantizeTakeProfit(targetPrice, quotePrecision, position.side), quotePrecision);
+    const std::string clientId = "fbtr" +
+            sha256Hex(symbol + ":" + position.position_id + ":" + std::to_string(entrySequence)).substr(0, 20);
+    const json requestBody = {
+        {"symbol", symbol},
+        {"qty", decimalString(normalizedQuantity, basePrecision)},
+        {"price", limitPrice},
+        {"side", closeSide},
+        {"tradeSide", "CLOSE"},
+        {"positionId", position.position_id},
+        {"orderType", "LIMIT"},
+        {"effect", "GTC"},
+        {"reduceOnly", true},
+        {"clientId", clientId}
+    };
+
+    json response;
+    if (!signedBitunixRequest(apiKey, apiSecret, "POST",
+                              baseUrl + "/api/v1/futures/trade/place_order",
+                              {}, requestBody, response)) {
+        return false;
+    }
+    if (!response.contains("data") || !response["data"].is_object() ||
+        !response["data"].contains("orderId")) {
+        std::cerr << "[Bitunix] Exchange did not confirm standalone trade TP LIMIT for "
+                  << symbol << std::endl;
+        return false;
+    }
+
+    std::cout << "[Bitunix] Placed standalone trade TP LIMIT for " << symbol << " "
+              << position.side << " qty " << requestBody["qty"] << " at " << limitPrice
+              << " (clientId " << clientId << ")" << std::endl;
+    return true;
 }
 
 bool BitunixExchange::getPendingPositions(const std::string& symbol,
@@ -618,20 +671,20 @@ bool BitunixExchange::reconcileCycleTakeProfits(const std::string& symbol,
 
 bool BitunixExchange::openLong(const std::string& symbol, double quantity) {
     // To open a Long, we BUY on the LONG position side
-    return placeOrder(symbol, "BUY", "LONG", "OPEN", quantity, 0.0);
+    return placeOrder(symbol, "BUY", "LONG", "OPEN", quantity);
 }
 
 bool BitunixExchange::closeLong(const std::string& symbol, double quantity) {
     // To close a Long, we SELL on the LONG position side
-    return placeOrder(symbol, "SELL", "LONG", "CLOSE", quantity, 0.0);
+    return placeOrder(symbol, "SELL", "LONG", "CLOSE", quantity);
 }
 
 bool BitunixExchange::openShort(const std::string& symbol, double quantity) {
     // To open a Short, we SELL on the SHORT position side
-    return placeOrder(symbol, "SELL", "SHORT", "OPEN", quantity, 0.0);
+    return placeOrder(symbol, "SELL", "SHORT", "OPEN", quantity);
 }
 
 bool BitunixExchange::closeShort(const std::string& symbol, double quantity) {
     // To close a Short, we BUY on the SHORT position side
-    return placeOrder(symbol, "BUY", "SHORT", "CLOSE", quantity, 0.0);
+    return placeOrder(symbol, "BUY", "SHORT", "CLOSE", quantity);
 }

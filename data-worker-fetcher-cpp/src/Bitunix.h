@@ -26,8 +26,9 @@ public:
 
     // Core private method to handle the actual HTTP POST request
     bool placeOrder(const std::string& symbol, const std::string& side, const std::string& positionSide,
-                    const std::string& tradeSide, double quantity, double takeProfitPrice,
-                    bool attachTradeTakeProfit = false);
+                    const std::string& tradeSide, double quantity);
+    bool placeTradeTakeProfitLimit(const std::string& symbol, const BitunixPosition& position,
+                                   double quantity, double targetPrice, int entrySequence);
     bool getPendingPositions(const std::string& symbol, std::vector<BitunixPosition>& positions);
     bool reconcileCycleTakeProfits(const std::string& symbol,
                                    const std::vector<BitunixPosition>& positions,
