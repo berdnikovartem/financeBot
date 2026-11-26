@@ -1336,3 +1336,81 @@ button:not(:disabled):active { transform: scale(.985); }
 @media (prefers-reduced-motion: reduce) {
   .skeleton-block::after { animation: none; }
 }
+.strategy-no-signals {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 3px 6px;
+  border: 1px dashed #3a3d45;
+  border-radius: 4px;
+  color: #777e89;
+  font-family: 'DM Mono', monospace;
+  font-size: 8px;
+  white-space: nowrap;
+}
+
+.order-size-preview {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 7px 14px;
+  margin: -4px 0 16px;
+  padding: 10px 12px;
+  border: 1px solid #292c33;
+  border-radius: 7px;
+  background: #0e1014;
+  color: #9298a3;
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+}
+
+.order-size-preview > div { display: flex; align-items: baseline; gap: 8px; }
+.order-size-preview strong { color: #dfe2e7; font-size: 11px; }
+.order-size-preview small { color: #9298a3; }
+.order-size-preview p { width: 100%; margin: 0; color: #f0a36d; }
+.order-size-preview.below-minimum { border-color: #80563e; }
+
+.indicator-config-list { display: grid; gap: 9px; }
+.indicator-config-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid #292c33;
+  border-radius: 8px;
+  background: #0e1014;
+}
+.indicator-config-row .field-grid { margin: 0; }
+.indicator-remove {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 8px;
+  border: 1px solid #343740;
+  border-radius: 5px;
+  background: #17191f;
+  color: #9da3ad;
+  font-size: 9px;
+}
+.indicator-remove:hover { border-color: #744f4d; color: #ef9a91; }
+
+.danger-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 12px;
+  border: 1px solid #754440;
+  border-radius: 6px;
+  background: #281918;
+  color: #eea19a;
+  font-size: 11px;
+}
+.danger-button:hover:not(:disabled) { background: #3a211f; }
+.danger-button:disabled { opacity: .55; cursor: not-allowed; }
+
+@media (max-width: 600px) {
+  .indicator-config-row { grid-template-columns: minmax(0, 1fr); }
+  .indicator-remove { justify-self: end; }
+}

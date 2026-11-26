@@ -27,7 +27,7 @@ type AuthMode = "login" | "register";
 const emptyDraft: BotDraft = {
   active: true,
   price_step_percentage: 0,
-  take_profit_percentage: 0,
+  take_profit_percentage: 5,
   trade_quantity: 0.001,
   parameters: {
     rsi_period: 14,
@@ -37,6 +37,7 @@ const emptyDraft: BotDraft = {
     hammer_multiplier: 1.5,
     volume_surge_multiplier: 1.5,
     trading_side: "BOTH",
+    take_profit_scope: "CYCLE",
     rsi_indicators: [{ period: 14, overbought: 70, oversold: 30, timeframe: "1h" }],
     hammer_indicators: [{ timeframe: "1h", multiplier: 1.5 }],
     volume_indicators: [{ timeframe: "1h", multiplier: 1.5 }],
@@ -154,12 +155,32 @@ function App() {
       });
       setSelectedBot(null);
       setNewStrategySymbol(null);
-      setView("bots");
+      setView("overview");
       showNotice("success", `${saved.symbol} strategy saved.`);
     } catch (error) {
       showNotice(
         "error",
         error instanceof Error ? error.message : "Could not save the strategy",
+      );
+    }
+  }
+
+  async function handleDelete(symbol: string) {
+    const confirmed = window.confirm(
+      `Delete the ${symbol} strategy and its saved configuration? This does not close or cancel any live Bitunix positions or orders.`,
+    );
+    if (!confirmed) return;
+    try {
+      await api.deleteBot(symbol);
+      setBots((current) => current.filter((bot) => bot.symbol !== symbol));
+      setSelectedBot(null);
+      setNewStrategySymbol(null);
+      setView("overview");
+      showNotice("success", `${symbol} strategy and saved configuration deleted.`);
+    } catch (error) {
+      showNotice(
+        "error",
+        error instanceof Error ? error.message : "Could not delete the strategy",
       );
     }
   }
@@ -241,6 +262,7 @@ function App() {
             hasBotsError={Boolean(botsError)}
             onSelect={setSelectedBot}
             onSave={handleSave}
+            onDelete={handleDelete}
             onCancel={() => {
               setSelectedBot(null);
               setNewStrategySymbol(null);
@@ -677,6 +699,9 @@ function Overview({
                 {formatStrategySignals(bot).slice(0, 3).map((signal, index) => (
                   <span className="strategy-signal-chip" key={`${index}-${signal}`}>{signal}</span>
                 ))}
+                {!formatStrategySignals(bot).length && (
+                  <span className="strategy-no-signals">No signals</span>
+                )}
               </span>
               <span className="strategy-pulse-updated">{formatStrategyUpdatedAt(bot.updatedAt)}</span>
               <ChevronRight className="strategy-pulse-chevron" size={15} />
@@ -1099,6 +1124,7 @@ function BotsView({
   hasBotsError,
   onSelect,
   onSave,
+  onDelete,
   onCancel,
 }: {
   bots: BotConfig[];
@@ -1107,6 +1133,7 @@ function BotsView({
   hasBotsError: boolean;
   onSelect: (bot: BotConfig | null) => void;
   onSave: (symbol: string, draft: BotDraft) => Promise<void>;
+  onDelete: (symbol: string) => Promise<void>;
   onCancel: () => void;
 }) {
   const [newBot, setNewBot] = useState(Boolean(initialSymbol));
@@ -1193,6 +1220,9 @@ function BotsView({
                           {formatStrategySignals(bot).map((signal, index) => (
                             <span className="strategy-signal-chip" key={`${index}-${signal}`}>{signal}</span>
                           ))}
+                          {!formatStrategySignals(bot).length && (
+                            <span className="strategy-no-signals">No signals</span>
+                          )}
                         </div>
                       </td>
                       <td className="strategy-side-cell">
@@ -1238,6 +1268,7 @@ function BotsView({
             bot={selectedBot}
             initialSymbol={draftSymbol}
             onSave={onSave}
+            onDelete={onDelete}
             onCancel={() => {
               setNewBot(false);
               setDraftSymbol("");
@@ -1270,10 +1301,10 @@ function formatStrategySignals(bot: BotConfig): string[] {
     signals.push(`VOL ${indicator.timeframe} · ×${indicator.multiplier}`);
   }
 
-  if (!signals.length && parameters) {
+  if (!signals.length && parameters && !Array.isArray(parameters.rsi_indicators)) {
     signals.push(`RSI ${parameters.rsi_period} · ${parameters.rsi_overbought}/${parameters.rsi_oversold}`);
   }
-  return signals.length ? signals : ["No signals configured"];
+  return signals;
 }
 
 function formatStrategyUpdatedAt(value?: string): string {
@@ -1823,11 +1854,13 @@ function BotEditor({
   bot,
   initialSymbol,
   onSave,
+  onDelete,
   onCancel,
 }: {
   bot: BotConfig | null;
   initialSymbol: string;
   onSave: (symbol: string, draft: BotDraft) => Promise<void>;
+  onDelete: (symbol: string) => Promise<void>;
   onCancel: () => void;
 }) {
   const normalizeParameters = (parameters: BotDraft["parameters"]) => ({
@@ -1845,11 +1878,15 @@ function BotEditor({
           price_step_percentage: bot.price_step_percentage ?? 0,
           take_profit_percentage: bot.take_profit_percentage ?? 0,
           trade_quantity: bot.trade_quantity ?? 0.001,
-          parameters: normalizeParameters(bot.parameters),
+          parameters: {
+            ...normalizeParameters(bot.parameters),
+            take_profit_scope: bot.parameters.take_profit_scope ?? "CYCLE",
+          },
         }
       : emptyDraft,
   );
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   useEffect(() => {
     const nextBot = bot
       ? {
@@ -1857,7 +1894,10 @@ function BotEditor({
           price_step_percentage: bot.price_step_percentage ?? 0,
           take_profit_percentage: bot.take_profit_percentage ?? 0,
           trade_quantity: bot.trade_quantity ?? 0.001,
-          parameters: normalizeParameters(bot.parameters),
+          parameters: {
+            ...normalizeParameters(bot.parameters),
+            take_profit_scope: bot.parameters.take_profit_scope ?? "CYCLE",
+          },
         }
       : emptyDraft;
     setSymbol(bot?.symbol ?? initialSymbol);
@@ -1913,6 +1953,15 @@ function BotEditor({
       setSaving(false);
     }
   }
+  async function deleteStrategy() {
+    if (!bot || deleting) return;
+    setDeleting(true);
+    try {
+      await onDelete(bot.symbol);
+    } finally {
+      setDeleting(false);
+    }
+  }
   return (
     <form className="editor-panel" onSubmit={submit}>
       <div className="editor-title">
@@ -1964,8 +2013,8 @@ function BotEditor({
           Take profit %
           <input
             type="number"
-            min={0}
-            max={100}
+            min={0.1}
+            max={99.9}
             step={0.1}
             value={draft.take_profit_percentage}
             onChange={(event) =>
@@ -1976,6 +2025,23 @@ function BotEditor({
             }
             disabled={saving}
           />
+        </label>
+        <label className="field">
+          Apply take profit to
+          <select
+            value={draft.parameters.take_profit_scope}
+            onChange={(event) =>
+              updateParam(
+                "take_profit_scope",
+                event.target.value as BotDraft["parameters"]["take_profit_scope"],
+              )
+            }
+            disabled={saving}
+          >
+            <option value="CYCLE">Whole cycle (average entry)</option>
+            <option value="TRADE">Each separate trade</option>
+          </select>
+          <small>Take-profit exits use limit orders, which may not fill immediately.</small>
         </label>
         <label className="field">
           Order quantity
@@ -1995,6 +2061,7 @@ function BotEditor({
           />
         </label>
       </div>
+      <OrderMinimumPreview symbol={symbol} quantity={draft.trade_quantity} />
       <div className="field-grid">
         <label className="field">
           Step distance %
@@ -2060,15 +2127,26 @@ function BotEditor({
         </button>
       </div>
       <div className="editor-actions">
+        {bot && (
+          <button
+            type="button"
+            className="danger-button"
+            onClick={() => void deleteStrategy()}
+            disabled={saving || deleting}
+          >
+            <Trash2 size={15} />
+            {deleting ? "Deleting…" : "Delete strategy"}
+          </button>
+        )}
         <button
           type="button"
           className="secondary-button"
           onClick={onCancel}
-          disabled={saving}
+          disabled={saving || deleting}
         >
           Cancel
         </button>
-        <button type="submit" className="primary-button" disabled={saving}>
+        <button type="submit" className="primary-button" disabled={saving || deleting}>
           {saving ? (
             <>
               <RefreshCw size={16} className="spin" />
@@ -2090,6 +2168,92 @@ function TimeframeOptions() {
   return <><option>1m</option><option>5m</option><option>15m</option><option>1h</option><option>4h</option></>;
 }
 
+function OrderMinimumPreview({ symbol, quantity }: { symbol: string; quantity: number }) {
+  const [market, setMarket] = useState<{ base: string; price: number; minimumQuantity: number } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const normalizedSymbol = symbol.trim().toUpperCase();
+
+  useEffect(() => {
+    if (!/^[A-Z0-9]{2,30}$/.test(normalizedSymbol)) {
+      setMarket(null);
+      setError(null);
+      return;
+    }
+    let disposed = false;
+    let controller: AbortController | undefined;
+    async function refresh() {
+      controller?.abort();
+      controller = new AbortController();
+      try {
+        const query = new URLSearchParams({ symbols: normalizedSymbol });
+        const [tickerResponse, pairResponse] = await Promise.all([
+          fetch(`/market-data/tickers?${query}`, { cache: "no-store", signal: controller.signal }),
+          fetch(`/market-data/trading_pairs?${query}`, { cache: "no-store", signal: controller.signal }),
+        ]);
+        if (!tickerResponse.ok || !pairResponse.ok) {
+          throw new Error("Bitunix market rules are temporarily unavailable.");
+        }
+        const [tickerResult, pairResult] = await Promise.all([
+          tickerResponse.json() as Promise<BitunixResponse<{ symbol: string; lastPrice: string }>>,
+          pairResponse.json() as Promise<BitunixResponse<{ symbol: string; base: string; minTradeVolume: string }>>,
+        ]);
+        const ticker = tickerResult.data.find((item) => item.symbol === normalizedSymbol);
+        const pair = pairResult.data.find((item) => item.symbol === normalizedSymbol);
+        const price = Number(ticker?.lastPrice);
+        const minimumQuantity = Number(pair?.minTradeVolume);
+        if (tickerResult.code !== 0 || pairResult.code !== 0 ||
+            !Number.isFinite(price) || price <= 0 ||
+            !Number.isFinite(minimumQuantity) || minimumQuantity <= 0 ||
+            !pair?.base) {
+          throw new Error("Bitunix did not provide valid market sizing rules.");
+        }
+        if (!disposed) {
+          setMarket({ base: pair.base, price, minimumQuantity });
+          setError(null);
+        }
+      } catch (requestError) {
+        if (!disposed && !(requestError instanceof DOMException && requestError.name === "AbortError")) {
+          setMarket(null);
+          setError(requestError instanceof Error ? requestError.message : "Market sizing data is unavailable.");
+        }
+      }
+    }
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 30_000);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+      controller?.abort();
+    };
+  }, [normalizedSymbol]);
+
+  const notional = market && Number.isFinite(quantity) && quantity > 0
+    ? quantity * market.price
+    : null;
+  const minimumNotional = market ? market.minimumQuantity * market.price : null;
+  const belowMinimum = Boolean(market && quantity < market.minimumQuantity);
+
+  return (
+    <div className={`order-size-preview${belowMinimum ? " below-minimum" : ""}`} aria-live="polite">
+      {market && notional !== null && minimumNotional !== null ? (
+        <>
+          <div>
+            <span>Estimated order value</span>
+            <strong>≈ ${notional.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+          </div>
+          <small>
+            Bitunix minimum: {market.minimumQuantity} {market.base}
+            {" "}≈ ${minimumNotional.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </small>
+          {belowMinimum && <p role="alert">This quantity is below Bitunix’s current minimum order size.</p>}
+        </>
+      ) : (
+        <small>{error ?? "Loading live price and Bitunix minimum order size…"}</small>
+      )}
+    </div>
+  );
+}
+
 function IndicatorEditor<T>({
   title,
   items,
@@ -2106,12 +2270,26 @@ function IndicatorEditor<T>({
   return (
     <section className="indicator-section">
       <div className="section-heading">
-        <div><span className="eyebrow">SIGNAL INPUT</span><h3>{title}</h3></div>
+        <div><span className="eyebrow">SIGNAL SETTINGS</span><h3>{title}</h3></div>
         <button type="button" className="secondary-button" onClick={onAdd} disabled={items.length >= 3}><Plus size={15} /> Add ({items.length}/3)</button>
       </div>
-      {items.map(render)}
+      <div className="indicator-config-list">
+        {items.map((item, index) => (
+          <div className="indicator-config-row" key={`indicator-${index}`}>
+            {render(item, index)}
+            <button
+              type="button"
+              className="indicator-remove"
+              onClick={() => onRemove(index)}
+              aria-label={`Remove ${title} ${index + 1}`}
+            >
+              <X size={14} />
+              <span>Remove</span>
+            </button>
+          </div>
+        ))}
+      </div>
       {!items.length && <small>No indicators configured.</small>}
-      {items.map((_, index) => <button type="button" className="text-button" key={`remove-${index}`} onClick={() => onRemove(index)}>Remove indicator {index + 1}</button>)}
     </section>
   );
 }

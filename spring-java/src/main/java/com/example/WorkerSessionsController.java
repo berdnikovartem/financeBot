@@ -43,6 +43,7 @@ public class WorkerSessionsController {
                                                 config.getRsiPeriod(), config.getRsiOverbought(),
                                                 config.getRsiOversold(), config.getTimeframe(),
                                                 config.getTakeProfitPct(), config.getTradeQuantity(),
+                                                config.getTakeProfitScope(),
                                                 config.getRsiIndicators(), config.getHammerTimeframe(),
                                                 config.getHammerIndicators(), config.getVolumeIndicators())))
                                 .toList()))

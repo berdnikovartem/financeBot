@@ -6,6 +6,8 @@
 #include <cmath>
 #include <algorithm>
 #include <unordered_map>
+#include <unordered_set>
+#include <utility>
 #include <curl/curl.h>
 #include <pqxx/pqxx>
 #include <nlohmann/json.hpp>
@@ -118,11 +120,14 @@ bool executeOrderAndNotify(BitunixExchange& exchange, const std::string& session
     const double new_quantity = position.quantity + quantity;
     const double average_entry_price =
             ((position.average_entry_price * position.quantity) + (close_price * quantity)) / new_quantity;
+    const bool take_profit_per_trade = bot.take_profit_scope == "TRADE";
+    const double take_profit_basis = take_profit_per_trade ? close_price : average_entry_price;
     const double target_price = position_side == "LONG"
-            ? average_entry_price * (1.0 + bot.take_profit_pct)
-            : average_entry_price * (1.0 - bot.take_profit_pct);
+            ? take_profit_basis * (1.0 + bot.take_profit_pct)
+            : take_profit_basis * (1.0 - bot.take_profit_pct);
     const bool success = exchange.placeOrder(bot.symbol, order_side, position_side, "OPEN",
-                                             quantity, target_price);
+                                             quantity, take_profit_per_trade ? target_price : 0.0,
+                                             take_profit_per_trade);
 
     if (success) {
         std::cout << " [SUCCESS] " << position_side << " position created for " << bot.symbol << std::endl;
@@ -134,6 +139,14 @@ bool executeOrderAndNotify(BitunixExchange& exchange, const std::string& session
         position.average_entry_price = average_entry_price;
         position.quantity = new_quantity;
         position.last_entry_price = close_price;
+        if (!take_profit_per_trade) {
+            std::vector<BitunixPosition> open_positions;
+            if (!exchange.getPendingPositions(bot.symbol, open_positions) ||
+                !exchange.reconcileCycleTakeProfits(bot.symbol, open_positions, bot.take_profit_pct)) {
+                std::cerr << " [TP SYNC] Cycle limit TP could not be immediately reconciled for "
+                          << bot.symbol << "; worker will retry during its next scan." << std::endl;
+            }
+        }
         sendTelegramAlert(alert);
         return true;
     } else {
@@ -177,6 +190,7 @@ int main() {
 
         if (config_fetcher.fetchWorkerSessions(sessions)) {
             size_t market_count = 0;
+            std::unordered_set<std::string> active_strategy_keys;
             for (const auto& session : sessions) market_count += session.configs.size();
             std::cout << "[INFO] Active markets count: " << market_count
                       << " across " << sessions.size() << " user session(s)" << std::endl;
@@ -184,11 +198,61 @@ int main() {
             for (const auto& session : sessions) {
                 BitunixExchange exchange(session.api_key, session.api_secret);
                 for (const auto& bot : session.configs) {
+                const std::string strategy_key = session.email + ":" + bot.symbol;
+                active_strategy_keys.insert(strategy_key);
                 std::cout << "\n[SCAN] Evaluating " << bot.symbol
                           << " | RSI indicators: " << bot.rsi_indicators.size()
                           << " | Hammer indicators: " << bot.hammer_indicators.size()
                           << " | Volume indicators: " << bot.volume_indicators.size()
                           << " | Step distance: " << bot.price_step_percentage << "%" << std::endl;
+
+                std::vector<BitunixPosition> open_positions;
+                if (!exchange.getPendingPositions(bot.symbol, open_positions)) {
+                    std::cerr << " [POSITION MONITOR] Could not verify " << bot.symbol
+                              << "; skipping this scan to avoid duplicating an unknown open position."
+                              << std::endl;
+                    continue;
+                }
+
+                bool has_long_position = false;
+                bool has_short_position = false;
+                for (const auto& open_position : open_positions) {
+                    const std::string position_key = strategy_key + ":" + open_position.side;
+                    auto& position = positions[position_key];
+                    position.quantity = open_position.quantity;
+                    position.average_entry_price = open_position.average_open_price;
+                    if (position.last_entry_price <= 0.0) {
+                        position.last_entry_price = open_position.average_open_price;
+                    }
+                    if (open_position.side == "LONG") has_long_position = true;
+                    if (open_position.side == "SHORT") has_short_position = true;
+                }
+                for (const auto& [side, exists] :
+                     std::vector<std::pair<std::string, bool>>{{"LONG", has_long_position},
+                                                               {"SHORT", has_short_position}}) {
+                    const std::string position_key = strategy_key + ":" + side;
+                    if (!exists && positions.erase(position_key) > 0) {
+                        std::cout << " [POSITION MONITOR] No " << side << " position remains for "
+                                  << bot.symbol << "; resetting that trade cycle." << std::endl;
+                    }
+                }
+
+                if (!std::isfinite(bot.take_profit_pct) ||
+                    bot.take_profit_pct <= 0.0 || bot.take_profit_pct >= 1.0 ||
+                    (bot.take_profit_scope != "CYCLE" && bot.take_profit_scope != "TRADE")) {
+                    std::cerr << " [ERROR] Invalid take-profit setting for " << bot.symbol
+                              << "; expected 0 < percentage < 100 and scope CYCLE or TRADE."
+                              << std::endl;
+                    continue;
+                }
+                if (!exchange.reconcileCycleTakeProfits(
+                            bot.symbol, open_positions, bot.take_profit_pct,
+                            bot.take_profit_scope == "CYCLE")) {
+                    std::cerr << " [TP SYNC] Could not reconcile limit take-profits for "
+                              << bot.symbol << "; deferring new signals until the next poll."
+                              << std::endl;
+                    continue;
+                }
 
                 bool is_oversold = !bot.rsi_indicators.empty();
                 bool is_overbought = !bot.rsi_indicators.empty();
@@ -302,6 +366,15 @@ int main() {
                     std::cerr << "       -> [WARNING] No configured RSI produced a valid value." << std::endl;
                 }
             }
+            }
+            for (auto position = positions.begin(); position != positions.end();) {
+                const bool strategyStillActive = std::any_of(
+                        active_strategy_keys.begin(), active_strategy_keys.end(),
+                        [&position](const std::string& key) {
+                            return position->first.rfind(key + ":", 0) == 0;
+                        });
+                if (!strategyStillActive) position = positions.erase(position);
+                else ++position;
             }
         } else {
             std::cerr << "[WARNING] Failed to sync active configs from API. Retrying next cycle..." << std::endl;

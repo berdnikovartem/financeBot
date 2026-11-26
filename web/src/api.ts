@@ -6,6 +6,7 @@ export type ParametersDto = {
   hammer_multiplier: number
   volume_surge_multiplier: number
   trading_side: 'LONG' | 'SHORT' | 'BOTH'
+  take_profit_scope: 'CYCLE' | 'TRADE'
   rsi_indicators: RsiIndicator[]
   hammer_indicators: HammerIndicator[]
   volume_indicators: VolumeIndicator[]
@@ -116,6 +117,10 @@ export function saveBot(symbol: string, draft: BotDraft) {
     await refresh()
     return request<BotConfig>(path, init)
   })
+}
+
+export function deleteBot(symbol: string) {
+  return request<void>(`/v1/config/${encodeURIComponent(symbol)}`, { method: 'DELETE' })
 }
 
 export function saveCredentials(apiKey: string, apiSecret: string) {

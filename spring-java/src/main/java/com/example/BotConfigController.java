@@ -54,6 +54,21 @@ public class BotConfigController{
         return ResponseEntity.ok(repo.save(config));
     }
 
+    @DeleteMapping("/config/{symbol}")
+    public ResponseEntity<Void> deleteConfig(@PathVariable String symbol, Authentication authentication) {
+        boolean isUser = authentication.getAuthorities().stream()
+                .anyMatch(authority -> authority.getAuthority().equals("ROLE_USER"));
+        if (!isUser) return ResponseEntity.status(403).build();
+
+        AppUser user = users.findByEmail(authentication.getName()).orElseThrow();
+        return repo.findByUserAndSymbol(user, symbol)
+                .map(config -> {
+                    repo.delete(config);
+                    return ResponseEntity.noContent().<Void>build();
+                })
+                .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
     @GetMapping("/configs")
     public ResponseEntity<List<BotConfig>> getUserConfigs(Authentication authentication) {
         AppUser user = users.findByEmail(authentication.getName()).orElseThrow();
@@ -82,6 +97,7 @@ public class BotConfigController{
                                 config.getTimeframe(),
                                 config.getTakeProfitPct(),
                                 config.getTradeQuantity(),
+                                config.getTakeProfitScope(),
                                 config.getRsiIndicators(),
                                 config.getHammerTimeframe(),
                                 config.getHammerIndicators(),

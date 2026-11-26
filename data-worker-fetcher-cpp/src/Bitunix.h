@@ -1,5 +1,14 @@
 #pragma once
 #include <string>
+#include <vector>
+
+struct BitunixPosition {
+    std::string position_id;
+    std::string symbol;
+    std::string side;
+    double quantity = 0.0;
+    double average_open_price = 0.0;
+};
 
 class BitunixExchange {
 private:
@@ -20,11 +29,17 @@ public:
 
     // Core private method to handle the actual HTTP POST request
     bool placeOrder(const std::string& symbol, const std::string& side, const std::string& positionSide,
-                    const std::string& tradeSide, double quantity, double takeProfitPrice);
+                    const std::string& tradeSide, double quantity, double takeProfitPrice,
+                    bool attachTradeTakeProfit = false);
     bool placeTakeProfit(const std::string& symbol, const std::string& side,
                          const std::string& positionSide, double quantity,
                          double triggerPrice, std::string& orderId);
     bool cancelTakeProfit(const std::string& symbol, const std::string& orderId);
+    bool getPendingPositions(const std::string& symbol, std::vector<BitunixPosition>& positions);
+    bool reconcileCycleTakeProfits(const std::string& symbol,
+                                   const std::vector<BitunixPosition>& positions,
+                                   double takeProfitPercentage,
+                                   bool updateOpenPositionOrders = true);
 
 
     // Position Management Methods

@@ -211,6 +211,11 @@ public class BotConfig{
         return ((Number) parameters.get("trade_quantity")).doubleValue();
     }
 
+    public String getTakeProfitScope() {
+        Object scope = parameters == null ? null : parameters.get("take_profit_scope");
+        return "TRADE".equals(scope) ? "TRADE" : "CYCLE";
+    }
+
     public java.util.List<java.util.Map<String, Object>> getRsiIndicators() {
         if (parameters == null || !(parameters.get("rsi_indicators") instanceof java.util.List<?>)) {
             return java.util.List.of(java.util.Map.of(

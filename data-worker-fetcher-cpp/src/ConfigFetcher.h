@@ -26,6 +26,7 @@ struct BotParams { //basic values
     double rsi_oversold = 30.0;
     std::string timeframe = "1h";
     double take_profit_pct = 0.05;
+    std::string take_profit_scope = "CYCLE";
     double trade_quantity = 0.001;
 };
 
